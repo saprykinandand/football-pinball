@@ -1478,6 +1478,9 @@ class PinballScene extends Phaser.Scene {
 
     const alpha = object.alpha ?? 1
     if (object.kind === 'goalkeeper_path') {
+      if (!params.showGoalkeeperPath) {
+        return
+      }
       this.layoutGraphics.lineStyle(3, colorToNumber(object.fill), 0.8)
       this.strokePolygon(points)
       return
@@ -1979,6 +1982,7 @@ debugFolder.addBinding(params, 'showVisualShapes', { label: 'Visual SVG' })
 debugFolder.addBinding(params, 'showMatterBodies', { label: 'Matter Bodies' })
 debugFolder.addBinding(params, 'showSafetyBodies', { label: 'Safety Bodies' })
 debugFolder.addBinding(params, 'showAlignmentCompare', { label: 'Compare Align' })
+debugFolder.addBinding(params, 'showGoalkeeperPath', { label: 'Goalkeeper Path' })
 debugFolder.addBinding(params, 'showLaunchArrow', { label: 'Launch Arrow' })
 debugFolder.addBinding(params, 'freezePhysics', { label: 'Freeze Physics' })
 
