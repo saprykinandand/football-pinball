@@ -20,43 +20,98 @@ body,
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 10px;
   gap: 10px;
 }
 
+.toolbar {
+  width: min(100%, 980px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar button,
+.touch-controls button {
+  border: 1px solid #c7e8c0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #2d7d46;
+  color: #ffffff;
+  font-size: 0.9rem;
+  touch-action: manipulation;
+}
+
+.toolbar button:active,
+.touch-controls button:active {
+  background: #49a862;
+}
+
+#selected-name,
+#status-line {
+  min-height: 20px;
+  color: #d8f6d0;
+  font-size: 0.9rem;
+}
+
+#selected-name {
+  margin-left: auto;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-row {
+  width: min(100%, 980px);
+  display: grid;
+  grid-template-columns: minmax(280px, 375px) minmax(260px, 1fr);
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+}
+
 #game-container {
-  width: min(100vw, 440px);
-  aspect-ratio: 21 / 38;
+  width: min(100%, 375px);
+  max-height: calc(100svh - 150px);
+  aspect-ratio: 375 / 812;
   border: 2px solid #c7e8c0;
   border-radius: 14px;
   overflow: hidden;
-  background: #145b2f;
+  background: #103e23;
 }
 
 #game-container canvas {
   display: block;
 }
 
+#layout-json {
+  width: 100%;
+  min-height: 420px;
+  max-height: calc(100svh - 150px);
+  resize: vertical;
+  border: 1px solid #315f3b;
+  border-radius: 8px;
+  padding: 10px;
+  background: #071a0e;
+  color: #d8f6d0;
+  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#layout-json.is-editing {
+  border-color: #c7e8c0;
+}
+
 .touch-controls {
-  width: min(100vw, 440px);
+  width: min(100%, 375px);
   display: flex;
   gap: 12px;
 }
 
 .touch-controls button {
   flex: 1;
-  border: 1px solid #c7e8c0;
-  border-radius: 10px;
-  padding: 12px;
-  background: #2d7d46;
-  color: #ffffff;
-  font-size: 0.95rem;
-  touch-action: manipulation;
-}
-
-.touch-controls button:active {
-  background: #49a862;
 }
 
 .debug-pane {
@@ -64,4 +119,24 @@ body,
   top: 8px;
   right: 8px;
   z-index: 10;
+}
+
+@media (max-width: 760px) {
+  .game-row {
+    grid-template-columns: 1fr;
+  }
+
+  #game-container,
+  .touch-controls {
+    justify-self: center;
+  }
+
+  #layout-json {
+    min-height: 180px;
+  }
+
+  #selected-name {
+    width: 100%;
+    margin-left: 0;
+  }
 }
