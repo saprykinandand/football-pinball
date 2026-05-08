@@ -88,7 +88,7 @@ body,
 #game-container {
   width: min(100%, 375px);
   max-height: calc(100svh - 150px);
-  aspect-ratio: 375 / 812;
+  aspect-ratio: 375 / 540;
   border: 2px solid #c7e8c0;
   border-radius: 14px;
   overflow: hidden;

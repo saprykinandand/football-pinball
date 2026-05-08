@@ -17,6 +17,8 @@ const MatterBody = Phaser.Physics.Matter.Matter.Body
 const MatterVertices = Phaser.Physics.Matter.Matter.Vertices
 const EDIT_HANDLE_RADIUS = 7
 const LAUNCH_BUTTON_IMPULSE_Y = 0.012
+const GAME_VIEW_WIDTH = 375
+const GAME_VIEW_HEIGHT = 540
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -256,6 +258,7 @@ class PinballScene extends Phaser.Scene {
     this.bindUi()
     this.bindEditInput()
     this.bindPhysicsEvents()
+    this.applyGameViewport()
     this.rebuildPlayBodies()
     this.syncTextarea()
     this.syncPhysicsTextarea()
@@ -665,6 +668,16 @@ class PinballScene extends Phaser.Scene {
     return bodyA === this.ballBody ? bodyB : bodyB === this.ballBody ? bodyA : null
   }
 
+  applyGameViewport() {
+    const fieldBase = this.level.objects.find((object) => object.name === 'field_base_symmetrical' && object.points)
+      || this.level.objects.find((object) => object.kind === 'field_base' && object.points)
+    const bounds = fieldBase?.points ? pointsBounds(fieldBase.points) : { minY: 0, maxY: this.level.height }
+    const maxScrollY = Math.max(0, this.level.height - GAME_VIEW_HEIGHT)
+    const centeredTop = (bounds.minY + bounds.maxY - GAME_VIEW_HEIGHT) / 2
+    const scrollY = Phaser.Math.Clamp(centeredTop, 0, maxScrollY)
+    this.cameras.main.setScroll(0, scrollY)
+  }
+
   setMode(mode) {
     this.mode = mode
     if (mode !== 'play') {
@@ -679,6 +692,7 @@ class PinballScene extends Phaser.Scene {
   }
 
   rebuildForMode() {
+    this.applyGameViewport()
     if (this.mode === 'play') {
       this.rebuildPlayBodies()
     } else {
@@ -1764,8 +1778,8 @@ class PinballScene extends Phaser.Scene {
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game-container',
-  width: DEFAULT_LEVEL.width,
-  height: DEFAULT_LEVEL.height,
+  width: GAME_VIEW_WIDTH,
+  height: GAME_VIEW_HEIGHT,
   backgroundColor: '#103e23',
   physics: {
     default: 'matter',
