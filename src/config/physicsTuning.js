@@ -64,7 +64,6 @@ export const DEFAULT_PHYSICS_CONFIG = {
   "showAlignmentCompare": false,
   "showGoalkeeperPath": false,
   "showLaunchArrow": false,
-  "showBallVisualSpin": true,
   "freezePhysics": false,
   "launchForceMin": 0.052000000000000005,
   "launchForceMax": 0.08600000000000001,

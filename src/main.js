@@ -182,8 +182,6 @@ class PinballScene extends Phaser.Scene {
     this.levelSaveTimer = null
     this.servePending = false
     this.ballVisualAngle = 0
-    this.ballOvalSegments = 28
-    this.ballOvalPoints = Array.from({ length: this.ballOvalSegments }, () => ({ x: 0, y: 0 }))
     this.launchArrow = null
     this.lastLaunch = null
   }
@@ -1026,20 +1024,16 @@ class PinballScene extends Phaser.Scene {
   }
 
   updateBallVisualSpin(delta) {
-    if (!params.showBallVisualSpin) {
-      return
-    }
-
     const velocity = this.ballBody.velocity
     const speed = Math.hypot(velocity.x, velocity.y)
     if (speed < 0.02) {
       return
     }
 
+    const radius = Math.max(this.getBallRadius(), 1)
     const spinDirection = Math.abs(velocity.x) > 0.2 ? Math.sign(velocity.x) : Math.sign(velocity.y || 1)
-    const visualSpinRate = 0.01
     this.ballVisualAngle = Phaser.Math.Angle.Wrap(
-      this.ballVisualAngle + spinDirection * delta * visualSpinRate,
+      this.ballVisualAngle + spinDirection * (speed / radius) * delta * 0.018,
     )
   }
 
@@ -1507,17 +1501,20 @@ class PinballScene extends Phaser.Scene {
     this.layoutGraphics.fillStyle(0xffffff, 1)
     this.layoutGraphics.fillCircle(x, y, ballRadius)
 
-    for (let i = 0; i < this.ballOvalSegments; i += 1) {
-      const t = (i / this.ballOvalSegments) * Math.PI * 2
+    const points = []
+    const segments = 28
+    for (let i = 0; i < segments; i += 1) {
+      const t = (i / segments) * Math.PI * 2
       const localX = Math.cos(t) * ovalRadiusX
       const localY = Math.sin(t) * ovalRadiusY
-      const point = this.ballOvalPoints[i]
-      point.x = x + localX * cosAngle - localY * sinAngle
-      point.y = y + localX * sinAngle + localY * cosAngle
+      points.push({
+        x: x + localX * cosAngle - localY * sinAngle,
+        y: y + localX * sinAngle + localY * cosAngle,
+      })
     }
 
     this.layoutGraphics.fillStyle(0x3a2416, 1)
-    this.layoutGraphics.fillPoints(this.ballOvalPoints, true)
+    this.layoutGraphics.fillPoints(points, true)
   }
 
   drawAlignmentComparison() {
@@ -2041,7 +2038,6 @@ ballFolder.addBinding(params, 'ballDensity', { min: 0.0001, max: 0.03, step: 0.0
 ballFolder.addBinding(params, 'ballFriction', { min: 0, max: 0.15, step: 0.001, label: 'Friction' })
 ballFolder.addBinding(params, 'ballFrictionAir', { min: 0, max: 0.08, step: 0.0005, label: 'Air Friction' })
 ballFolder.addBinding(params, 'ballRestitution', { min: 0.1, max: 1.3, step: 0.01, label: 'Restitution' })
-ballFolder.addBinding(params, 'showBallVisualSpin', { label: 'Ball Rotate Visual' })
 
 const bumpersFolder = pane.addFolder({ title: 'Bumpers' })
 bumpersFolder.addBinding(params, 'bumperRestitution', { min: 0.3, max: 1.8, step: 0.01, label: 'Restitution' })
