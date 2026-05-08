@@ -40,6 +40,7 @@ app.innerHTML = `
       <button id="mode-toggle">Edit Mode</button>
       <button id="reset-layout">Reset SVG Layout</button>
       <button id="reset-physics">Reset Physics</button>
+      <button id="reset-score">Reset Score</button>
       <button id="serve-ball">Serve Ball</button>
       <button id="rotate-left">Rotate -5</button>
       <button id="rotate-right">Rotate +5</button>
@@ -186,6 +187,7 @@ class PinballScene extends Phaser.Scene {
     this.lastGoalShakeAt = -Infinity
     this.launchArrow = null
     this.lastLaunch = null
+    this.sessionGoals = 0
   }
 
   create() {
@@ -205,6 +207,7 @@ class PinballScene extends Phaser.Scene {
     this.syncTextarea()
     this.syncPhysicsTextarea()
     this.updateModeUi()
+    this.updateSessionScoreStatus()
   }
 
   update(_time, delta) {
@@ -421,6 +424,10 @@ class PinballScene extends Phaser.Scene {
     document.querySelector('#serve-ball').onclick = () => {
       this.serveBall()
     }
+    document.querySelector('#reset-score').onclick = () => {
+      this.sessionGoals = 0
+      this.updateSessionScoreStatus()
+    }
     document.querySelector('#rotate-left').onclick = () => this.rotateSelected(-5)
     document.querySelector('#rotate-right').onclick = () => this.rotateSelected(5)
   }
@@ -532,10 +539,11 @@ class PinballScene extends Phaser.Scene {
         }
         if (kind === 'sensor_goal') {
           this.triggerImpactShake('goal')
-          this.setStatus('Goal detected')
+          this.sessionGoals += 1
+          this.updateSessionScoreStatus()
           this.serveBall()
         } else if (kind === 'sensor_lose') {
-          this.setStatus('Lose area detected')
+          this.updateSessionScoreStatus()
           this.serveBall()
         } else if ((kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') && !other.plugin?.safety) {
           if (this.tryKickContactBody(other)) {
@@ -1202,7 +1210,6 @@ class PinballScene extends Phaser.Scene {
     this.lastLaunch = launch
     this.servePending = true
     this.launchArrow = params.showLaunchArrow ? this.createLaunchArrow(launch, params.launchDelayMs + 900) : null
-    this.setStatus(`Serving: force ${launch.force.toFixed(3)}, x ${launch.launchX.toFixed(3)}`)
     console.info('Serve Ball', {
       force: Number(launch.force.toFixed(4)),
       launchX: Number(launch.launchX.toFixed(4)),
@@ -1230,7 +1237,7 @@ class PinballScene extends Phaser.Scene {
 
     this.resetBallToSpawn()
     if (params.freezePhysics) {
-      this.setStatus(`Serve ready: force ${launch.force.toFixed(3)}, x ${launch.launchX.toFixed(3)}`)
+      this.updateSessionScoreStatus()
       return
     }
 
@@ -1239,7 +1246,7 @@ class PinballScene extends Phaser.Scene {
       y: launch.vector.y * launch.force,
     })
     this.clampBallVelocity()
-    this.setStatus(`Launched: force ${launch.force.toFixed(3)}, x ${launch.launchX.toFixed(3)}`)
+    this.updateSessionScoreStatus()
   }
 
   createLaunchArrow(launch, lifetimeMs) {
@@ -1331,7 +1338,7 @@ class PinballScene extends Phaser.Scene {
       ny = -0.2
     }
 
-    const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.2 }
+    const goalCenter = this.getGoalBiasTarget()
     const gx = goalCenter.x - this.ballBody.position.x
     const gy = goalCenter.y - this.ballBody.position.y
     const goalLength = Math.max(Math.hypot(gx, gy), 1)
@@ -1369,6 +1376,14 @@ class PinballScene extends Phaser.Scene {
       return params.goalkeeperImpulse
     }
     return params.bumperImpulse
+  }
+
+  getGoalBiasTarget() {
+    const goalSensor = this.level.objects.find((object) => object.kind === 'sensor_goal' && object.points?.length >= 3)
+    if (goalSensor) {
+      return polygonCenter(goalSensor.points)
+    }
+    return { x: this.level.width * 0.5, y: this.level.height * 0.2 }
   }
 
   lowSpeedThresholdForKind(kind) {
@@ -1431,7 +1446,7 @@ class PinballScene extends Phaser.Scene {
 
     const kind = body.plugin?.kind
     if (kind === 'bumper' && params.bumperGoalBias > 0) {
-      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const goalCenter = this.getGoalBiasTarget()
       const gx = goalCenter.x - this.ballBody.position.x
       const gy = goalCenter.y - this.ballBody.position.y
       const goalLength = Math.max(Math.hypot(gx, gy), 1)
@@ -1444,7 +1459,7 @@ class PinballScene extends Phaser.Scene {
     }
 
     if (kind === 'flipper' && params.flipperGoalBias > 0) {
-      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const goalCenter = this.getGoalBiasTarget()
       const gx = goalCenter.x - this.ballBody.position.x
       const gy = goalCenter.y - this.ballBody.position.y
       const goalLength = Math.max(Math.hypot(gx, gy), 1)
@@ -1457,7 +1472,7 @@ class PinballScene extends Phaser.Scene {
     }
 
     if (kind === 'goalkeeper' && params.goalkeeperGoalAvoidBias > 0) {
-      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const goalCenter = this.getGoalBiasTarget()
       const awayX = this.ballBody.position.x - goalCenter.x
       const awayY = this.ballBody.position.y - goalCenter.y
       const awayLength = Math.max(Math.hypot(awayX, awayY), 1)
@@ -2030,6 +2045,10 @@ class PinballScene extends Phaser.Scene {
 
   setStatus(message) {
     document.querySelector('#status-line').textContent = message
+  }
+
+  updateSessionScoreStatus() {
+    this.setStatus(`Goals this session: ${this.sessionGoals}`)
   }
 
   setJsonState(type, message) {
