@@ -1030,10 +1030,10 @@ class PinballScene extends Phaser.Scene {
       return
     }
 
-    const radius = Math.max(this.getBallRadius(), 1)
     const spinDirection = Math.abs(velocity.x) > 0.2 ? Math.sign(velocity.x) : Math.sign(velocity.y || 1)
+    const visualSpinRate = 0.01
     this.ballVisualAngle = Phaser.Math.Angle.Wrap(
-      this.ballVisualAngle + spinDirection * (speed / radius) * delta * 0.018,
+      this.ballVisualAngle + spinDirection * delta * visualSpinRate,
     )
   }
 
