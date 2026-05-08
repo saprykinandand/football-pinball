@@ -38,8 +38,8 @@ app.innerHTML = `
     </div>
     <div class="toolbar">
       <button id="mode-toggle">Edit Mode</button>
-      <button id="save-all">Save All</button>
       <button id="reset-layout">Reset SVG Layout</button>
+      <button id="reset-physics">Reset Physics</button>
       <button id="serve-ball">Serve Ball</button>
       <button id="rotate-left">Rotate -5</button>
       <button id="rotate-right">Rotate +5</button>
@@ -73,7 +73,7 @@ app.innerHTML = `
 `
 app.classList.remove('tuning-open')
 
-const PHYSICS_STORAGE_KEY = 'football-pinball.physics-config.v1'
+const PHYSICS_STORAGE_KEY = 'football-pinball.physics-config.v2'
 const PHYSICS_PARAM_TYPES = Object.fromEntries(
   Object.entries(DEFAULT_PHYSICS_CONFIG).map(([key, value]) => [key, typeof value]),
 )
@@ -182,6 +182,8 @@ class PinballScene extends Phaser.Scene {
     this.levelSaveTimer = null
     this.servePending = false
     this.ballVisualAngle = 0
+    this.lastImpactShakeAt = -Infinity
+    this.lastGoalShakeAt = -Infinity
     this.launchArrow = null
     this.lastLaunch = null
   }
@@ -208,14 +210,12 @@ class PinballScene extends Phaser.Scene {
   update(_time, delta) {
     if (this.mode === 'play') {
       this.matter.world.engine.gravity.y = params.gravityY
-      this.applySolverTuning()
-      this.applyBodyTuning()
       this.updateDebugVisibility()
       this.applyFreezeState()
       if (params.freezePhysics) {
         this.freezeBall()
       } else {
-        this.updateFlippers()
+        this.updateFlippers(delta)
         this.updatePlayers()
         this.updateGoalkeeper(delta)
         this.updateBall(delta)
@@ -396,9 +396,6 @@ class PinballScene extends Phaser.Scene {
     document.querySelector('#mode-toggle').onclick = () => {
       this.setMode(this.mode === 'play' ? 'edit' : 'play')
     }
-    document.querySelector('#save-all').onclick = () => {
-      this.saveAllJson()
-    }
     document.querySelector('#reset-layout').onclick = () => {
       this.level = clone(DEFAULT_LEVEL)
       clearStoredLevel()
@@ -407,6 +404,19 @@ class PinballScene extends Phaser.Scene {
       this.syncTextarea()
       this.updateSelectionUi()
       this.setStatus('Reset to SVG layout')
+    }
+    document.querySelector('#reset-physics').onclick = () => {
+      resetPhysicsParamsToDefaults()
+      savePhysicsConfigToStorage(params)
+      if (window.physicsPane) {
+        window.physicsPane.refresh()
+      }
+      this.syncPhysicsTextarea()
+      this.setJsonState('physics', `defaults ${formatTime()}`)
+      this.setStatus('Physics reset to defaults')
+      if (this.mode === 'play') {
+        this.rebuildPlayBodies()
+      }
     }
     document.querySelector('#serve-ball').onclick = () => {
       this.serveBall()
@@ -521,6 +531,7 @@ class PinballScene extends Phaser.Scene {
           this.tryKickMovingFlipper(other.plugin.levelName)
         }
         if (kind === 'sensor_goal') {
+          this.triggerImpactShake('goal')
           this.setStatus('Goal detected')
           this.serveBall()
         } else if (kind === 'sensor_lose') {
@@ -529,8 +540,10 @@ class PinballScene extends Phaser.Scene {
         } else if ((kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') && !other.plugin?.safety) {
           if (this.tryKickContactBody(other)) {
             if (kind === 'bumper') {
+              this.triggerImpactShake('bumper')
               this.markBumperHit(other.plugin?.levelName)
             } else if (kind === 'player' || kind === 'goalkeeper') {
+              this.triggerImpactShake(kind)
               this.markCharacterHit(other.plugin?.levelName, kind)
             }
           }
@@ -612,6 +625,7 @@ class PinballScene extends Phaser.Scene {
 
   rebuildPlayBodies() {
     this.clearPlayBodies()
+    this.normalizeFlipperAnchors()
     this.matter.world.setGravity(0, params.gravityY)
     this.applySolverTuning()
     this.flipperState.clear()
@@ -722,6 +736,58 @@ class PinballScene extends Phaser.Scene {
     this.ballFrozen = null
     this.applyFreezeState()
     this.serveBall()
+  }
+
+  normalizeFlipperAnchors() {
+    for (const object of this.level.objects) {
+      if (object.kind !== 'flipper' || object.side !== 'left' || !object.pair) {
+        continue
+      }
+      const pair = this.findObject(object.pair)
+      if (!pair || pair.kind !== 'flipper') {
+        continue
+      }
+
+      const anchorLeft = this.findObject(object.anchor)
+      const anchorRight = this.findObject(pair.anchor)
+      if (!anchorLeft?.point || !anchorRight?.point) {
+        continue
+      }
+
+      const axis = Number.isFinite(object.mirrorAxis) ? object.mirrorAxis : this.level.width / 2
+      anchorRight.point.x = axis + (axis - anchorLeft.point.x)
+      anchorRight.point.y = anchorLeft.point.y
+    }
+  }
+
+  triggerImpactShake(kind = 'impact') {
+    const camera = this.cameras?.main
+    if (!camera) {
+      return
+    }
+
+    const now = this.time.now
+    if (kind === 'goal') {
+      if (now - this.lastGoalShakeAt < params.shakeGoalCooldownMs) {
+        return
+      }
+      this.lastGoalShakeAt = now
+      camera.shake(params.shakeGoalDurationMs, params.shakeGoalIntensity)
+      return
+    }
+
+    if (now - this.lastImpactShakeAt < params.shakeImpactCooldownMs) {
+      return
+    }
+    this.lastImpactShakeAt = now
+
+    const preset = kind === 'flipper'
+      ? { duration: params.shakeFlipperDurationMs, intensity: params.shakeFlipperIntensity }
+      : kind === 'bumper'
+        ? { duration: params.shakeBumperDurationMs, intensity: params.shakeBumperIntensity }
+        : { duration: params.shakePlayerDurationMs, intensity: params.shakePlayerIntensity }
+
+    camera.shake(preset.duration, preset.intensity)
   }
 
   clearPlayBodies() {
@@ -893,7 +959,11 @@ class PinballScene extends Phaser.Scene {
     body.render.fillOpacity = 0
   }
 
-  updateFlippers() {
+  updateFlippers(delta) {
+    const baseFrameMs = 1000 / ENGINE_PHYSICS_DEFAULTS.runnerFps
+    const frameScale = Phaser.Math.Clamp(delta / baseFrameMs, 0.6, 2.4)
+    const maxStep = params.flipperSpeed * frameScale
+
     for (const [name, state] of this.flipperState) {
       const held = this.isFlipperHeld(name)
       if (!held) {
@@ -901,7 +971,7 @@ class PinballScene extends Phaser.Scene {
       }
       const targetAngle = held ? state.activeAngle : 0
       const delta = Phaser.Math.Angle.Wrap(targetAngle - state.currentAngle)
-      const angleStep = Phaser.Math.Clamp(delta, -params.flipperSpeed, params.flipperSpeed)
+      const angleStep = Phaser.Math.Clamp(delta, -maxStep, maxStep)
       state.lastAngleStep = angleStep
       state.currentAngle += angleStep
       const nextPosition = rotatePoint(state.basePosition, state.anchor, state.currentAngle)
@@ -1237,6 +1307,7 @@ class PinballScene extends Phaser.Scene {
     state.swingKicked = true
     this.lastFlipperKickAt.set(name, this.time.now)
     this.kickBallFromFlipper(state, motionScale)
+    this.triggerImpactShake('flipper')
     return true
   }
 
@@ -1953,6 +2024,8 @@ class PinballScene extends Phaser.Scene {
   updateModeUi() {
     document.querySelector('#mode-toggle').textContent = this.mode === 'play' ? 'Edit Mode' : 'Play Mode'
     document.querySelector('#layout-json').classList.toggle('is-editing', this.mode === 'edit')
+    document.querySelector('#rotate-left').style.display = this.mode === 'edit' ? '' : 'none'
+    document.querySelector('#rotate-right').style.display = this.mode === 'edit' ? '' : 'none'
   }
 
   setStatus(message) {
@@ -2014,21 +2087,6 @@ const pane = new Pane({ title: 'Physics Debug' })
 pane.element.classList.add('debug-pane')
 pane.element.classList.add('is-hidden')
 window.physicsPane = pane
-
-const defaultsFolder = pane.addFolder({ title: 'Defaults' })
-defaultsFolder.addButton({ title: 'Reset Physics Defaults' }).on('click', () => {
-  resetPhysicsParamsToDefaults()
-  savePhysicsConfigToStorage(params)
-  pane.refresh()
-  if (window.pinballScene) {
-    window.pinballScene.syncPhysicsTextarea()
-    window.pinballScene.setJsonState('physics', `defaults ${formatTime()}`)
-    window.pinballScene.setStatus('Physics reset to defaults')
-    if (window.pinballScene.mode === 'play') {
-      window.pinballScene.rebuildPlayBodies()
-    }
-  }
-})
 
 const worldFolder = pane.addFolder({ title: 'World' })
 worldFolder.addBinding(params, 'gravityY', { min: 0.2, max: 2.2, step: 0.01, label: 'Gravity Y' })
@@ -2120,12 +2178,28 @@ debugFolder.addBinding(params, 'showGoalkeeperPath', { label: 'Goalkeeper Path' 
 debugFolder.addBinding(params, 'showLaunchArrow', { label: 'Launch Arrow' })
 debugFolder.addBinding(params, 'freezePhysics', { label: 'Freeze Physics' })
 
+const shakeFolder = pane.addFolder({ title: 'Camera Shake' })
+shakeFolder.addBinding(params, 'shakeFlipperDurationMs', { min: 20, max: 300, step: 5, label: 'Flipper Dur' })
+shakeFolder.addBinding(params, 'shakeFlipperIntensity', { min: 0, max: 0.01, step: 0.0001, label: 'Flipper Int' })
+shakeFolder.addBinding(params, 'shakeBumperDurationMs', { min: 20, max: 300, step: 5, label: 'Bumper Dur' })
+shakeFolder.addBinding(params, 'shakeBumperIntensity', { min: 0, max: 0.01, step: 0.0001, label: 'Bumper Int' })
+shakeFolder.addBinding(params, 'shakePlayerDurationMs', { min: 20, max: 300, step: 5, label: 'Player Dur' })
+shakeFolder.addBinding(params, 'shakePlayerIntensity', { min: 0, max: 0.01, step: 0.0001, label: 'Player Int' })
+shakeFolder.addBinding(params, 'shakeGoalDurationMs', { min: 40, max: 450, step: 5, label: 'Goal Dur' })
+shakeFolder.addBinding(params, 'shakeGoalIntensity', { min: 0, max: 0.02, step: 0.0001, label: 'Goal Int' })
+shakeFolder.addBinding(params, 'shakeImpactCooldownMs', { min: 0, max: 200, step: 5, label: 'Impact CD' })
+shakeFolder.addBinding(params, 'shakeGoalCooldownMs', { min: 0, max: 500, step: 5, label: 'Goal CD' })
+
 ballRadiusBinding.on('change', () => {
   if (window.pinballScene?.mode === 'play') {
     window.pinballScene.rebuildBallBody()
   }
 })
 pane.on('change', () => {
+  if (window.pinballScene) {
+    window.pinballScene.applySolverTuning()
+    window.pinballScene.applyBodyTuning()
+  }
   savePhysicsConfigToStorage(params)
   if (window.pinballScene) {
     window.pinballScene.syncPhysicsTextarea()

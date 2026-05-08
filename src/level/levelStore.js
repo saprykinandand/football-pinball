@@ -1,7 +1,7 @@
 import { DEFAULT_LEVEL } from '../defaultLevel.js'
 import { mirrorPoints } from './geometry.js'
 
-export const STORAGE_KEY = 'football-pinball-layout-json'
+export const STORAGE_KEY = 'football-pinball-layout-json.v2'
 
 export function clone(value) {
   return JSON.parse(JSON.stringify(value))
