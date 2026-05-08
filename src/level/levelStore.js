@@ -1,4 +1,5 @@
 import { DEFAULT_LEVEL } from '../defaultLevel.js'
+import { mirrorPoints } from './geometry.js'
 
 export const STORAGE_KEY = 'football-pinball-layout-json'
 
@@ -39,6 +40,7 @@ export function normalizeLevel(level) {
   next.objects = Array.isArray(next.objects) ? next.objects : clone(DEFAULT_LEVEL.objects)
   ensureBallSpawn(next)
   ensureMirrorAxes(next)
+  ensureMirroredFieldCollision(next)
   return next
 }
 
@@ -75,8 +77,9 @@ export function ensureBallSpawn(level) {
 }
 
 function ensureMirrorAxes(level) {
+  const axis = level.width / 2
   for (const object of level.objects) {
-    if (!object.pair || object.mirrorAxis !== undefined) {
+    if (!object.pair) {
       continue
     }
 
@@ -85,37 +88,22 @@ function ensureMirrorAxes(level) {
       continue
     }
 
-    const axis = (objectCenterX(object) + objectCenterX(paired)) / 2
     object.mirrorAxis = axis
     paired.mirrorAxis = axis
   }
 }
 
-function objectCenterX(object) {
-  if (object.point) {
-    return object.point.x
+function ensureMirroredFieldCollision(level) {
+  const left = level.objects.find((object) => object.name === 'field_collision_left_instance' && object.points)
+  const right = level.objects.find((object) => object.name === 'field_collision_right_instance' && object.points)
+  if (!left || !right) {
+    return
   }
-  return polygonCenter(object.points).x
-}
 
-function polygonCenter(points) {
-  const clean = cleanPoints(points)
-  const total = clean.reduce((sum, point) => {
-    sum.x += point.x
-    sum.y += point.y
-    return sum
-  }, { x: 0, y: 0 })
-  return { x: total.x / clean.length, y: total.y / clean.length }
-}
-
-function cleanPoints(points) {
-  const next = points.map((point) => ({ x: Number(point.x), y: Number(point.y) }))
-  if (next.length > 2) {
-    const first = next[0]
-    const last = next[next.length - 1]
-    if (Math.abs(first.x - last.x) < 0.001 && Math.abs(first.y - last.y) < 0.001) {
-      next.pop()
-    }
-  }
-  return next
+  const axis = level.width / 2
+  right.points = mirrorPoints(left.points, axis)
+  left.pair = right.name
+  right.pair = left.name
+  left.mirrorAxis = axis
+  right.mirrorAxis = axis
 }
