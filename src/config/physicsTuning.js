@@ -1,4 +1,7 @@
 export const ENGINE_PHYSICS_DEFAULTS = {
+  targetFps: 60,
+  panicMax: 60,
+  smoothStep: true,
   runnerFps: 120,
   maxSubsteps: 3,
   positionIterations: 10,
@@ -67,6 +70,9 @@ export const DEFAULT_PHYSICS_CONFIG = {
   "showAlignmentCompare": false,
   "showGoalkeeperPath": false,
   "showLaunchArrow": false,
+  "debugMatterEnabled": false,
+  "showPerfStats": false,
+  "maxVisualDeltaMs": 33,
   "shakeFlipperDurationMs": 70,
   "shakeFlipperIntensity": 0.0029,
   "shakeBumperDurationMs": 205,
