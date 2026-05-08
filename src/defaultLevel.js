@@ -609,6 +609,60 @@ export const DEFAULT_LEVEL = {
       "mirrorAxis": 187.5
     },
     {
+      "name": "extra_collision_box_left_instance",
+      "kind": "field_collision",
+      "sourceIndex": 18,
+      "fill": "#0B301A",
+      "points": [
+        {
+          "x": 22.107695154586708,
+          "y": 532.6076951545867
+        },
+        {
+          "x": 94.5,
+          "y": 570.8484954833984
+        },
+        {
+          "x": 85.5,
+          "y": 589.8484954833984
+        },
+        {
+          "x": 10.10769515458665,
+          "y": 553.3923048454133
+        }
+      ],
+      "side": "left",
+      "pair": "extra_collision_box_right_instance",
+      "mirrorAxis": 187.5
+    },
+    {
+      "name": "extra_collision_box_right_instance",
+      "kind": "field_collision",
+      "sourceIndex": 19,
+      "fill": "#0B301A",
+      "points": [
+        {
+          "x": 364.8923048454134,
+          "y": 553.3923048454133
+        },
+        {
+          "x": 289.5,
+          "y": 589.8484954833984
+        },
+        {
+          "x": 280.5,
+          "y": 570.8484954833984
+        },
+        {
+          "x": 352.89230484541326,
+          "y": 532.6076951545867
+        }
+      ],
+      "side": "right",
+      "pair": "extra_collision_box_left_instance",
+      "mirrorAxis": 187.5
+    },
+    {
       "name": "winning_area_goal",
       "kind": "sensor_goal",
       "sourceIndex": 15,

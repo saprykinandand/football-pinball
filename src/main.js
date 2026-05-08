@@ -183,6 +183,8 @@ class PinballScene extends Phaser.Scene {
     this.levelSaveTimer = null
     this.servePending = false
     this.ballVisualAngle = 0
+    this.ballImpactSquash = 0
+    this.ballImpactAngle = 0
     this.lastImpactShakeAt = -Infinity
     this.lastGoalShakeAt = -Infinity
     this.launchArrow = null
@@ -1107,15 +1109,22 @@ class PinballScene extends Phaser.Scene {
   updateBallVisualSpin(delta) {
     const velocity = this.ballBody.velocity
     const speed = Math.hypot(velocity.x, velocity.y)
+    this.ballImpactSquash = Math.max(0, this.ballImpactSquash - (delta / 1000) * Math.max(0, params.ballSquashRecover))
     if (speed < 0.02) {
       return
     }
 
+    this.ballImpactAngle = Math.atan2(velocity.y, velocity.x)
     const radius = Math.max(this.getBallRadius(), 1)
     const spinDirection = Math.abs(velocity.x) > 0.2 ? Math.sign(velocity.x) : Math.sign(velocity.y || 1)
     this.ballVisualAngle = Phaser.Math.Angle.Wrap(
       this.ballVisualAngle + spinDirection * (speed / radius) * delta * 0.018,
     )
+  }
+
+  markBallSquash(angle, amount = params.ballImpactSquash) {
+    this.ballImpactAngle = angle
+    this.ballImpactSquash = Math.max(this.ballImpactSquash, Math.max(0, amount))
   }
 
   clampBallVelocity() {
@@ -1163,6 +1172,8 @@ class PinballScene extends Phaser.Scene {
     MatterBody.setVelocity(this.ballBody, { x: 0, y: 0 })
     MatterBody.setAngularVelocity(this.ballBody, 0)
     this.ballVisualAngle = 0
+    this.ballImpactSquash = 0
+    this.ballImpactAngle = 0
   }
 
   chooseLaunchVector() {
@@ -1365,6 +1376,7 @@ class PinballScene extends Phaser.Scene {
       x: this.ballBody.velocity.x + nx * velocityKick,
       y: this.ballBody.velocity.y + ny * velocityKick,
     })
+    this.markBallSquash(Math.atan2(ny, nx), params.ballImpactSquash * 1.15)
     this.clampBallVelocity()
   }
 
@@ -1492,6 +1504,7 @@ class PinballScene extends Phaser.Scene {
         x: this.ballBody.velocity.x + nx * velocityKick,
         y: this.ballBody.velocity.y + ny * velocityKick,
       })
+      this.markBallSquash(Math.atan2(ny, nx))
     } else if (kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') {
       const speed = Math.hypot(this.ballBody.velocity.x, this.ballBody.velocity.y)
       const lowSpeedThreshold = Math.max(
@@ -1524,6 +1537,7 @@ class PinballScene extends Phaser.Scene {
         x: this.ballBody.velocity.x + nx * velocityKick,
         y: this.ballBody.velocity.y + ny * velocityKick,
       })
+      this.markBallSquash(Math.atan2(ny, nx))
     } else {
       this.ballBody.force.x += nx * cappedForce
       this.ballBody.force.y += ny * cappedForce
@@ -1581,14 +1595,23 @@ class PinballScene extends Phaser.Scene {
     const ballRadius = this.getBallRadius()
     const x = this.ballBody.position.x
     const y = this.ballBody.position.y
+    const squash = this.ballSquashAmount()
+    const squashAngle = this.ballSquashAngle()
     const angle = this.ballVisualAngle
     const ovalRadiusX = ballRadius * 0.55
     const ovalRadiusY = ballRadius * 0.85
     const cosAngle = Math.cos(angle)
     const sinAngle = Math.sin(angle)
 
+    const outerPoints = []
+    const outerSegments = 34
+    for (let i = 0; i < outerSegments; i += 1) {
+      const t = (i / outerSegments) * Math.PI * 2
+      outerPoints.push(this.ballVisualPoint(Math.cos(t) * ballRadius, Math.sin(t) * ballRadius, squashAngle, squash))
+    }
+
     this.layoutGraphics.fillStyle(0xffffff, 1)
-    this.layoutGraphics.fillCircle(x, y, ballRadius)
+    this.layoutGraphics.fillPoints(outerPoints, true)
 
     const points = []
     const segments = 28
@@ -1596,14 +1619,48 @@ class PinballScene extends Phaser.Scene {
       const t = (i / segments) * Math.PI * 2
       const localX = Math.cos(t) * ovalRadiusX
       const localY = Math.sin(t) * ovalRadiusY
-      points.push({
-        x: x + localX * cosAngle - localY * sinAngle,
-        y: y + localX * sinAngle + localY * cosAngle,
-      })
+      const spunX = localX * cosAngle - localY * sinAngle
+      const spunY = localX * sinAngle + localY * cosAngle
+      points.push(this.ballVisualPoint(spunX, spunY, squashAngle, squash))
     }
 
     this.layoutGraphics.fillStyle(0x3a2416, 1)
     this.layoutGraphics.fillPoints(points, true)
+  }
+
+  ballVisualPoint(localX, localY, angle, squash) {
+    const stretch = 1 + squash
+    const squeeze = Math.max(0.55, 1 - squash * 0.65)
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const worldX = localX * stretch
+    const worldY = localY * squeeze
+    return {
+      x: this.ballBody.position.x + worldX * cos - worldY * sin,
+      y: this.ballBody.position.y + worldX * sin + worldY * cos,
+    }
+  }
+
+  ballSquashAmount() {
+    if (!this.ballBody) {
+      return 0
+    }
+
+    const speed = Math.hypot(this.ballBody.velocity.x, this.ballBody.velocity.y)
+    const speedAmount = Phaser.Math.Clamp(speed / Math.max(params.maxBallSpeed, 1), 0, 1) * Math.max(0, params.ballSpeedSquash)
+    return Phaser.Math.Clamp(speedAmount + this.ballImpactSquash, 0, 0.45)
+  }
+
+  ballSquashAngle() {
+    if (!this.ballBody) {
+      return this.ballImpactAngle
+    }
+
+    const velocity = this.ballBody.velocity
+    if (Math.hypot(velocity.x, velocity.y) > 0.08) {
+      return Math.atan2(velocity.y, velocity.x)
+    }
+    return this.ballImpactAngle
   }
 
   drawAlignmentComparison() {
@@ -2118,6 +2175,9 @@ ballFolder.addBinding(params, 'ballDensity', { min: 0.0001, max: 0.03, step: 0.0
 ballFolder.addBinding(params, 'ballFriction', { min: 0, max: 0.15, step: 0.001, label: 'Friction' })
 ballFolder.addBinding(params, 'ballFrictionAir', { min: 0, max: 0.08, step: 0.0005, label: 'Air Friction' })
 ballFolder.addBinding(params, 'ballRestitution', { min: 0.1, max: 1.3, step: 0.01, label: 'Restitution' })
+ballFolder.addBinding(params, 'ballSpeedSquash', { min: 0, max: 0.4, step: 0.01, label: 'Speed Squash' })
+ballFolder.addBinding(params, 'ballImpactSquash', { min: 0, max: 0.45, step: 0.01, label: 'Impact Squash' })
+ballFolder.addBinding(params, 'ballSquashRecover', { min: 1, max: 18, step: 0.5, label: 'Squash Recover' })
 
 const bumpersFolder = pane.addFolder({ title: 'Bumpers' })
 bumpersFolder.addBinding(params, 'bumperRestitution', { min: 0.3, max: 1.8, step: 0.01, label: 'Restitution' })

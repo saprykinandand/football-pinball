@@ -39,6 +39,8 @@ export function normalizeLevel(level) {
   next.ball = next.ball || clone(DEFAULT_LEVEL.ball)
   next.objects = Array.isArray(next.objects) ? next.objects : clone(DEFAULT_LEVEL.objects)
   ensureBallSpawn(next)
+  ensureDefaultObject(next, 'extra_collision_box_left_instance')
+  ensureDefaultObject(next, 'extra_collision_box_right_instance')
   ensureMirrorAxes(next)
   ensureMirroredFieldCollision(next)
   return next
@@ -106,4 +108,15 @@ function ensureMirroredFieldCollision(level) {
   right.pair = left.name
   left.mirrorAxis = axis
   right.mirrorAxis = axis
+}
+
+function ensureDefaultObject(level, name) {
+  if (level.objects.some((object) => object.name === name)) {
+    return
+  }
+
+  const defaultObject = DEFAULT_LEVEL.objects.find((object) => object.name === name)
+  if (defaultObject) {
+    level.objects.push(clone(defaultObject))
+  }
 }
