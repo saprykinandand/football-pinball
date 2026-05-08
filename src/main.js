@@ -182,6 +182,8 @@ class PinballScene extends Phaser.Scene {
     this.levelSaveTimer = null
     this.servePending = false
     this.ballVisualAngle = 0
+    this.ballOvalSegments = 28
+    this.ballOvalPoints = Array.from({ length: this.ballOvalSegments }, () => ({ x: 0, y: 0 }))
     this.launchArrow = null
     this.lastLaunch = null
   }
@@ -1505,20 +1507,17 @@ class PinballScene extends Phaser.Scene {
     this.layoutGraphics.fillStyle(0xffffff, 1)
     this.layoutGraphics.fillCircle(x, y, ballRadius)
 
-    const points = []
-    const segments = 28
-    for (let i = 0; i < segments; i += 1) {
-      const t = (i / segments) * Math.PI * 2
+    for (let i = 0; i < this.ballOvalSegments; i += 1) {
+      const t = (i / this.ballOvalSegments) * Math.PI * 2
       const localX = Math.cos(t) * ovalRadiusX
       const localY = Math.sin(t) * ovalRadiusY
-      points.push({
-        x: x + localX * cosAngle - localY * sinAngle,
-        y: y + localX * sinAngle + localY * cosAngle,
-      })
+      const point = this.ballOvalPoints[i]
+      point.x = x + localX * cosAngle - localY * sinAngle
+      point.y = y + localX * sinAngle + localY * cosAngle
     }
 
     this.layoutGraphics.fillStyle(0x3a2416, 1)
-    this.layoutGraphics.fillPoints(points, true)
+    this.layoutGraphics.fillPoints(this.ballOvalPoints, true)
   }
 
   drawAlignmentComparison() {
