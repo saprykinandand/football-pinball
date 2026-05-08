@@ -33,14 +33,13 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div class="game-shell">
     <div class="quick-controls">
-      <button id="quick-reset-ball">Reset Ball</button>
+      <button id="quick-serve-ball">Serve Ball</button>
       <button id="toggle-tuning">Tuning</button>
     </div>
     <div class="toolbar">
       <button id="mode-toggle">Edit Mode</button>
       <button id="save-all">Save All</button>
       <button id="reset-layout">Reset SVG Layout</button>
-      <button id="reset-ball">Reset Ball</button>
       <button id="serve-ball">Serve Ball</button>
       <button id="rotate-left">Rotate -5</button>
       <button id="rotate-right">Rotate +5</button>
@@ -122,6 +121,13 @@ function savePhysicsConfigToStorage(sourceParams) {
   localStorage.setItem(PHYSICS_STORAGE_KEY, exportPhysicsConfigJson(sourceParams))
 }
 
+function resetPhysicsParamsToDefaults() {
+  const defaults = createDefaultParams()
+  for (const key of Object.keys(DEFAULT_PHYSICS_CONFIG)) {
+    params[key] = defaults[key]
+  }
+}
+
 function formatTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
@@ -164,6 +170,7 @@ class PinballScene extends Phaser.Scene {
     this.safetyBodies = []
     this.objectBodies = new Map()
     this.flipperState = new Map()
+    this.playerMovementState = new Map()
     this.activeFlipperContacts = new Set()
     this.lastAntiStallKickAt = new Map()
     this.lastContactKickAt = new Map()
@@ -174,6 +181,7 @@ class PinballScene extends Phaser.Scene {
     this.serveTimer = null
     this.levelSaveTimer = null
     this.servePending = false
+    this.ballVisualAngle = 0
     this.launchArrow = null
     this.lastLaunch = null
   }
@@ -208,8 +216,9 @@ class PinballScene extends Phaser.Scene {
         this.freezeBall()
       } else {
         this.updateFlippers()
+        this.updatePlayers()
         this.updateGoalkeeper(delta)
-        this.updateBall()
+        this.updateBall(delta)
       }
     }
 
@@ -375,7 +384,7 @@ class PinballScene extends Phaser.Scene {
   }
 
   bindUi() {
-    document.querySelector('#quick-reset-ball').onclick = () => {
+    document.querySelector('#quick-serve-ball').onclick = () => {
       this.serveBall()
     }
     document.querySelector('#toggle-tuning').onclick = () => {
@@ -395,9 +404,6 @@ class PinballScene extends Phaser.Scene {
       this.syncTextarea()
       this.updateSelectionUi()
       this.setStatus('Reset to SVG layout')
-    }
-    document.querySelector('#reset-ball').onclick = () => {
-      this.serveBall()
     }
     document.querySelector('#serve-ball').onclick = () => {
       this.serveBall()
@@ -606,6 +612,7 @@ class PinballScene extends Phaser.Scene {
     this.matter.world.setGravity(0, params.gravityY)
     this.applySolverTuning()
     this.flipperState.clear()
+    this.playerMovementState.clear()
     this.objectBodies.clear()
     this.safetyBodies = []
     this.activeFlipperContacts.clear()
@@ -694,6 +701,16 @@ class PinballScene extends Phaser.Scene {
               basePosition: clone(safetyBody.position),
             })),
           }
+        } else if (object.kind === 'player') {
+          this.playerMovementState.set(object.name, {
+            body,
+            baseCenter: matterCentroid(object.points),
+            direction: object.side === 'right' ? -1 : 1,
+            safetyBodies: safetyBodies.map((safetyBody) => ({
+              body: safetyBody,
+              basePosition: clone(safetyBody.position),
+            })),
+          })
         }
       }
     }
@@ -712,6 +729,7 @@ class PinballScene extends Phaser.Scene {
     this.playBodies = []
     this.safetyBodies = []
     this.objectBodies.clear()
+    this.playerMovementState.clear()
     this.activeFlipperContacts.clear()
     this.lastAntiStallKickAt.clear()
     this.bumperHitEffects.clear()
@@ -898,6 +916,46 @@ class PinballScene extends Phaser.Scene {
     }
   }
 
+  updatePlayers() {
+    for (const state of this.playerMovementState.values()) {
+      const movement = this.playerMovementOffset(state)
+      const nextPosition = {
+        x: state.baseCenter.x + movement.x,
+        y: state.baseCenter.y + movement.y,
+      }
+
+      MatterBody.setPosition(state.body, nextPosition)
+      for (const safety of state.safetyBodies) {
+        MatterBody.setPosition(safety.body, {
+          x: safety.basePosition.x + movement.x,
+          y: safety.basePosition.y + movement.y,
+        })
+      }
+    }
+  }
+
+  playerMovementOffset(state) {
+    if (!params.playerMovementEnabled) {
+      return { x: 0, y: 0 }
+    }
+
+    const distance = Math.max(0, params.playerMovementDistance)
+    const phase = Math.sin(this.time.now * 0.001 * Math.max(0, params.playerMovementSpeed))
+    const direction = params.playerMovementParallel ? 1 : state.direction
+    const x = phase * distance * direction
+    const y = this.playerMovementArcY(phase)
+    return { x, y }
+  }
+
+  playerMovementArcY(phase) {
+    const height = params.playerMovementArcHeight
+    if (height === 0) {
+      return 0
+    }
+
+    return -height * (1 - phase * phase)
+  }
+
   updateGoalkeeper(delta) {
     if (!this.goalkeeperState) {
       return
@@ -935,7 +993,7 @@ class PinballScene extends Phaser.Scene {
     }
   }
 
-  updateBall() {
+  updateBall(delta) {
     if (!this.ballBody) {
       return
     }
@@ -946,6 +1004,7 @@ class PinballScene extends Phaser.Scene {
     }
 
     this.applyBallMaterialTuning()
+    this.updateBallVisualSpin(delta)
 
     if (this.keys.space.isDown && this.ballBody.position.y > this.level.height - 190) {
       this.ballBody.force.y -= LAUNCH_BUTTON_IMPULSE_Y
@@ -962,6 +1021,20 @@ class PinballScene extends Phaser.Scene {
     ) {
       this.serveBall()
     }
+  }
+
+  updateBallVisualSpin(delta) {
+    const velocity = this.ballBody.velocity
+    const speed = Math.hypot(velocity.x, velocity.y)
+    if (speed < 0.02) {
+      return
+    }
+
+    const radius = Math.max(this.getBallRadius(), 1)
+    const spinDirection = Math.abs(velocity.x) > 0.2 ? Math.sign(velocity.x) : Math.sign(velocity.y || 1)
+    this.ballVisualAngle = Phaser.Math.Angle.Wrap(
+      this.ballVisualAngle + spinDirection * (speed / radius) * delta * 0.018,
+    )
   }
 
   clampBallVelocity() {
@@ -1008,6 +1081,7 @@ class PinballScene extends Phaser.Scene {
     MatterBody.setPosition(this.ballBody, spawn)
     MatterBody.setVelocity(this.ballBody, { x: 0, y: 0 })
     MatterBody.setAngularVelocity(this.ballBody, 0)
+    this.ballVisualAngle = 0
   }
 
   chooseLaunchVector() {
@@ -1407,15 +1481,40 @@ class PinballScene extends Phaser.Scene {
     }
 
     if (this.ballBody) {
-      const ballRadius = this.getBallRadius()
-      this.layoutGraphics.fillStyle(0xffffff, 1)
-      this.layoutGraphics.fillCircle(this.ballBody.position.x, this.ballBody.position.y, ballRadius)
-      this.layoutGraphics.fillStyle(0x3a2416, 1)
-      this.layoutGraphics.fillEllipse(this.ballBody.position.x, this.ballBody.position.y, ballRadius * 1.1, ballRadius * 1.7)
+      this.drawBall()
     }
 
     this.drawLaunchArrow()
     this.drawEditOverlay()
+  }
+
+  drawBall() {
+    const ballRadius = this.getBallRadius()
+    const x = this.ballBody.position.x
+    const y = this.ballBody.position.y
+    const angle = this.ballVisualAngle
+    const ovalRadiusX = ballRadius * 0.55
+    const ovalRadiusY = ballRadius * 0.85
+    const cosAngle = Math.cos(angle)
+    const sinAngle = Math.sin(angle)
+
+    this.layoutGraphics.fillStyle(0xffffff, 1)
+    this.layoutGraphics.fillCircle(x, y, ballRadius)
+
+    const points = []
+    const segments = 28
+    for (let i = 0; i < segments; i += 1) {
+      const t = (i / segments) * Math.PI * 2
+      const localX = Math.cos(t) * ovalRadiusX
+      const localY = Math.sin(t) * ovalRadiusY
+      points.push({
+        x: x + localX * cosAngle - localY * sinAngle,
+        y: y + localX * sinAngle + localY * cosAngle,
+      })
+    }
+
+    this.layoutGraphics.fillStyle(0x3a2416, 1)
+    this.layoutGraphics.fillPoints(points, true)
   }
 
   drawAlignmentComparison() {
@@ -1538,7 +1637,7 @@ class PinballScene extends Phaser.Scene {
       return runtimePoints
     }
     if (this.mode === 'play' && object.kind === 'player') {
-      return this.applyCharacterHitOffset(object, object.points)
+      return this.applyCharacterHitOffset(object, this.getRuntimeSourcePoints(object))
     }
     return object.points
   }
@@ -1636,6 +1735,17 @@ class PinballScene extends Phaser.Scene {
       }
       const dx = body.position.x - this.goalkeeperState.baseCenter.x
       const dy = body.position.y - this.goalkeeperState.baseCenter.y
+      return translatePoints(object.points, dx, dy)
+    }
+
+    if (object.kind === 'player') {
+      const body = this.objectBodies.get(object.name)
+      const state = this.playerMovementState.get(object.name)
+      if (!body || Array.isArray(body) || !state) {
+        return object.points
+      }
+      const dx = body.position.x - state.baseCenter.x
+      const dy = body.position.y - state.baseCenter.y
       return translatePoints(object.points, dx, dy)
     }
 
@@ -1901,6 +2011,22 @@ const pane = new Pane({ title: 'Physics Debug' })
 pane.element.classList.add('debug-pane')
 pane.element.classList.add('is-hidden')
 window.physicsPane = pane
+
+const defaultsFolder = pane.addFolder({ title: 'Defaults' })
+defaultsFolder.addButton({ title: 'Reset Physics Defaults' }).on('click', () => {
+  resetPhysicsParamsToDefaults()
+  savePhysicsConfigToStorage(params)
+  pane.refresh()
+  if (window.pinballScene) {
+    window.pinballScene.syncPhysicsTextarea()
+    window.pinballScene.setJsonState('physics', `defaults ${formatTime()}`)
+    window.pinballScene.setStatus('Physics reset to defaults')
+    if (window.pinballScene.mode === 'play') {
+      window.pinballScene.rebuildPlayBodies()
+    }
+  }
+})
+
 const worldFolder = pane.addFolder({ title: 'World' })
 worldFolder.addBinding(params, 'gravityY', { min: 0.2, max: 2.2, step: 0.01, label: 'Gravity Y' })
 worldFolder.addBinding(params, 'maxBallSpeed', { min: 4, max: 40, step: 0.5, label: 'Max Ball Speed' })
@@ -1933,6 +2059,11 @@ playersFolder.addBinding(params, 'playerVelocityKick', { min: 0, max: 4, step: 0
 playersFolder.addBinding(params, 'playerLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' })
 playersFolder.addBinding(params, 'playerHitOffsetPx', { min: 0, max: 24, step: 1, label: 'Hit Offset Px' })
 playersFolder.addBinding(params, 'playerHitDurationMs', { min: 20, max: 260, step: 5, label: 'Hit Duration' })
+playersFolder.addBinding(params, 'playerMovementEnabled', { label: 'Move Players' })
+playersFolder.addBinding(params, 'playerMovementParallel', { label: 'Parallel Move' })
+playersFolder.addBinding(params, 'playerMovementDistance', { min: 0, max: 80, step: 1, label: 'Move Distance' })
+playersFolder.addBinding(params, 'playerMovementSpeed', { min: 0, max: 6, step: 0.1, label: 'Move Speed' })
+playersFolder.addBinding(params, 'playerMovementArcHeight', { min: -120, max: 120, step: 2, label: 'Arc Height' })
 
 const goalkeeperFolder = pane.addFolder({ title: 'Goalkeeper' })
 goalkeeperFolder.addBinding(params, 'goalkeeperImpulse', { min: 0, max: 0.1, step: 0.001, label: 'Impulse' })
