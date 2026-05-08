@@ -1024,6 +1024,10 @@ class PinballScene extends Phaser.Scene {
   }
 
   updateBallVisualSpin(delta) {
+    if (!params.showBallVisualSpin) {
+      return
+    }
+
     const velocity = this.ballBody.velocity
     const speed = Math.hypot(velocity.x, velocity.y)
     if (speed < 0.02) {
@@ -2038,6 +2042,7 @@ ballFolder.addBinding(params, 'ballDensity', { min: 0.0001, max: 0.03, step: 0.0
 ballFolder.addBinding(params, 'ballFriction', { min: 0, max: 0.15, step: 0.001, label: 'Friction' })
 ballFolder.addBinding(params, 'ballFrictionAir', { min: 0, max: 0.08, step: 0.0005, label: 'Air Friction' })
 ballFolder.addBinding(params, 'ballRestitution', { min: 0.1, max: 1.3, step: 0.01, label: 'Restitution' })
+ballFolder.addBinding(params, 'showBallVisualSpin', { label: 'Ball Rotate Visual' })
 
 const bumpersFolder = pane.addFolder({ title: 'Bumpers' })
 bumpersFolder.addBinding(params, 'bumperRestitution', { min: 0.3, max: 1.8, step: 0.01, label: 'Restitution' })
