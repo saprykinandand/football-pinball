@@ -317,6 +317,9 @@ class PinballScene extends Phaser.Scene {
   }
 
   bindControls() {
+    // Allow multi-touch so left and right flippers can be held together on phones.
+    this.input.addPointer(3)
+
     this.keys = this.input.keyboard.addKeys({
       left: Phaser.Input.Keyboard.KeyCodes.LEFT,
       right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
