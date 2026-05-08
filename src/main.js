@@ -2,7 +2,7 @@ import './style.css'
 import Phaser from 'phaser'
 import { Pane } from 'tweakpane'
 import { DEFAULT_LEVEL } from './defaultLevel.js'
-import { DEFAULT_PHYSICS_CONFIG, PHYSICS_TUNING, createDefaultParams } from './config/physicsTuning.js'
+import { DEFAULT_PHYSICS_CONFIG, ENGINE_PHYSICS_DEFAULTS, createDefaultParams } from './config/physicsTuning.js'
 import {
   clearStoredLevel,
   clone,
@@ -16,10 +16,15 @@ import {
 const MatterBody = Phaser.Physics.Matter.Matter.Body
 const MatterVertices = Phaser.Physics.Matter.Matter.Vertices
 const EDIT_HANDLE_RADIUS = 7
+const LAUNCH_BUTTON_IMPULSE_Y = 0.012
 
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div class="game-shell">
+    <div class="quick-controls">
+      <button id="quick-reset-ball">Reset Ball</button>
+      <button id="toggle-tuning">Tuning</button>
+    </div>
     <div class="toolbar">
       <button id="mode-toggle">Edit Mode</button>
       <button id="save-layout">Save Layout</button>
@@ -48,6 +53,7 @@ app.innerHTML = `
     <div id="status-line">Play Mode</div>
   </div>
 `
+app.classList.remove('tuning-open')
 
 const PHYSICS_STORAGE_KEY = 'football-pinball.physics-config.v1'
 const PHYSICS_PARAM_TYPES = Object.fromEntries(
@@ -95,6 +101,17 @@ function exportPhysicsConfigJson(sourceParams) {
 
 function savePhysicsConfigToStorage(sourceParams) {
   localStorage.setItem(PHYSICS_STORAGE_KEY, exportPhysicsConfigJson(sourceParams))
+}
+
+function setTuningOpen(isOpen) {
+  app.classList.toggle('tuning-open', isOpen)
+  const toggleButton = document.querySelector('#toggle-tuning')
+  if (toggleButton) {
+    toggleButton.textContent = isOpen ? 'Close Tuning' : 'Tuning'
+  }
+  if (window.physicsPane) {
+    window.physicsPane.element.classList.toggle('is-hidden', !isOpen)
+  }
 }
 
 const params = createDefaultParams()
@@ -209,6 +226,8 @@ class PinballScene extends Phaser.Scene {
     this.mode = 'play'
     this.leftPressed = false
     this.rightPressed = false
+    this.screenLeftPressed = false
+    this.screenRightPressed = false
     this.selectedName = null
     this.dragState = null
     this.playBodies = []
@@ -216,6 +235,8 @@ class PinballScene extends Phaser.Scene {
     this.objectBodies = new Map()
     this.flipperState = new Map()
     this.activeFlipperContacts = new Set()
+    this.bumperHitEffects = new Map()
+    this.characterHitEffects = new Map()
     this.goalkeeperState = null
     this.serveTimer = null
     this.servePending = false
@@ -262,9 +283,9 @@ class PinballScene extends Phaser.Scene {
 
   applySolverTuning() {
     const engine = this.matter.world.engine
-    engine.positionIterations = PHYSICS_TUNING.positionIterations
-    engine.velocityIterations = PHYSICS_TUNING.velocityIterations
-    engine.constraintIterations = PHYSICS_TUNING.constraintIterations
+    engine.positionIterations = ENGINE_PHYSICS_DEFAULTS.positionIterations
+    engine.velocityIterations = ENGINE_PHYSICS_DEFAULTS.velocityIterations
+    engine.constraintIterations = ENGINE_PHYSICS_DEFAULTS.constraintIterations
   }
 
   applyBodyTuning() {
@@ -290,9 +311,19 @@ class PinballScene extends Phaser.Scene {
     this.ballFrozen = params.freezePhysics
     MatterBody.setStatic(this.ballBody, params.freezePhysics)
     if (!params.freezePhysics) {
-      this.ballBody.restitution = params.ballRestitution
-      this.ballBody.friction = PHYSICS_TUNING.ballFriction
-      this.ballBody.frictionAir = PHYSICS_TUNING.ballFrictionAir
+      this.applyBallMaterialTuning()
+    }
+  }
+
+  applyBallMaterialTuning() {
+    if (!this.ballBody) {
+      return
+    }
+    this.ballBody.restitution = params.ballRestitution
+    this.ballBody.friction = params.ballFriction
+    this.ballBody.frictionAir = params.ballFrictionAir
+    if (Number.isFinite(params.ballDensity) && params.ballDensity > 0 && this.ballBody.density !== params.ballDensity) {
+      MatterBody.setDensity(this.ballBody, params.ballDensity)
     }
   }
 
@@ -374,12 +405,47 @@ class PinballScene extends Phaser.Scene {
       this.rightPressed = false
     }
 
+    const pointerSides = new Map()
+    const clearPointerSide = (pointerId) => {
+      const side = pointerSides.get(pointerId)
+      if (!side) {
+        return
+      }
+      pointerSides.delete(pointerId)
+      this.screenLeftPressed = Array.from(pointerSides.values()).includes('left')
+      this.screenRightPressed = Array.from(pointerSides.values()).includes('right')
+    }
+    this.input.on('pointerdown', (pointer) => {
+      if (this.mode !== 'play') {
+        return
+      }
+      const side = pointer.worldX < this.level.width / 2 ? 'left' : 'right'
+      pointerSides.set(pointer.id, side)
+      if (side === 'left') {
+        this.screenLeftPressed = true
+      } else {
+        this.screenRightPressed = true
+      }
+    })
+    this.input.on('pointerup', (pointer) => {
+      clearPointerSide(pointer.id)
+    })
+    this.input.on('pointerupoutside', (pointer) => {
+      clearPointerSide(pointer.id)
+    })
+
     this.input.keyboard.on('keydown-Q', () => this.rotateSelected(-5))
     this.input.keyboard.on('keydown-E', () => this.rotateSelected(5))
     this.input.keyboard.on('keydown-R', () => this.serveBall())
   }
 
   bindUi() {
+    document.querySelector('#quick-reset-ball').onclick = () => {
+      this.serveBall()
+    }
+    document.querySelector('#toggle-tuning').onclick = () => {
+      setTuningOpen(!app.classList.contains('tuning-open'))
+    }
     document.querySelector('#mode-toggle').onclick = () => {
       this.setMode(this.mode === 'play' ? 'edit' : 'play')
     }
@@ -421,6 +487,7 @@ class PinballScene extends Phaser.Scene {
     }
     document.querySelector('#import-physics').onclick = () => {
       try {
+        const previous = { ...params }
         const parsed = JSON.parse(document.querySelector('#physics-json').value)
         const changed = applyPhysicsConfig(params, parsed)
         if (!changed) {
@@ -431,7 +498,15 @@ class PinballScene extends Phaser.Scene {
         this.syncPhysicsTextarea()
         pane.refresh()
         if (this.mode === 'play') {
-          this.rebuildPlayBodies()
+          const collisionKeys = ['wallPadding', 'goalPadding', 'playerPadding', 'bumperPadding', 'flipperPadding']
+          const collisionChanged = collisionKeys.some((key) => previous[key] !== params[key])
+          if (collisionChanged) {
+            this.rebuildPlayBodies()
+          } else if (previous.ballRadius !== params.ballRadius) {
+            this.rebuildBallBody()
+          } else {
+            this.applyBallMaterialTuning()
+          }
         }
         this.setStatus('Physics config imported and saved')
       } catch {
@@ -538,7 +613,17 @@ class PinballScene extends Phaser.Scene {
           this.setStatus('Lose area detected')
           this.serveBall()
         } else if ((kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') && !other.plugin?.safety) {
-          this.kickBallFromBody(other, params.bumperImpulse, params.bumperImpulse)
+          const impulse = kind === 'player'
+            ? params.playerImpulse
+            : kind === 'goalkeeper'
+              ? params.goalkeeperImpulse
+              : params.bumperImpulse
+          this.kickBallFromBody(other, impulse, impulse)
+          if (kind === 'bumper') {
+            this.markBumperHit(other.plugin?.levelName)
+          } else if (kind === 'player' || kind === 'goalkeeper') {
+            this.markCharacterHit(other.plugin?.levelName, kind)
+          }
         }
       }
     })
@@ -582,6 +667,10 @@ class PinballScene extends Phaser.Scene {
 
   setMode(mode) {
     this.mode = mode
+    if (mode !== 'play') {
+      this.screenLeftPressed = false
+      this.screenRightPressed = false
+    }
     this.selectedName = null
     this.rebuildForMode()
     this.updateModeUi()
@@ -688,18 +777,7 @@ class PinballScene extends Phaser.Scene {
       }
     }
 
-    const ballRadius = this.getBallRadius()
-    const spawn = this.getBallSpawn()
-    this.ballBody = this.matter.add.circle(spawn.x, spawn.y, ballRadius, {
-      label: 'ball',
-      restitution: params.ballRestitution,
-      friction: PHYSICS_TUNING.ballFriction,
-      frictionAir: PHYSICS_TUNING.ballFrictionAir,
-      density: PHYSICS_TUNING.ballDensity,
-      slop: 0.02,
-    })
-    this.ballBody.circleRadius = ballRadius
-    this.playBodies.push(this.ballBody)
+    this.createBallBody(this.getBallSpawn())
     this.ballFrozen = null
     this.applyFreezeState()
     this.serveBall()
@@ -714,6 +792,8 @@ class PinballScene extends Phaser.Scene {
     this.safetyBodies = []
     this.objectBodies.clear()
     this.activeFlipperContacts.clear()
+    this.bumperHitEffects.clear()
+    this.characterHitEffects.clear()
     this.ballFrozen = null
     this.ballBody = null
     this.launchArrow = null
@@ -755,7 +835,36 @@ class PinballScene extends Phaser.Scene {
   }
 
   getBallRadius() {
-    return Math.max(this.level.ball.radius || 0, PHYSICS_TUNING.ballRadius)
+    return Math.max(this.level.ball.radius || 0, params.ballRadius)
+  }
+
+  createBallBody(spawn) {
+    const ballRadius = this.getBallRadius()
+    this.ballBody = this.matter.add.circle(spawn.x, spawn.y, ballRadius, {
+      label: 'ball',
+      restitution: params.ballRestitution,
+      friction: params.ballFriction,
+      frictionAir: params.ballFrictionAir,
+      density: params.ballDensity,
+      slop: 0.02,
+    })
+    this.ballBody.circleRadius = ballRadius
+    this.playBodies.push(this.ballBody)
+    this.applyBallMaterialTuning()
+  }
+
+  rebuildBallBody() {
+    if (!this.ballBody) {
+      return
+    }
+    this.cancelPendingServe()
+    this.matter.world.remove(this.ballBody, true)
+    this.playBodies = this.playBodies.filter((body) => body !== this.ballBody)
+    this.ballBody = null
+    this.ballFrozen = null
+    this.createBallBody(this.getBallSpawn())
+    this.applyFreezeState()
+    this.serveBall()
   }
 
   paddingForObject(object) {
@@ -842,8 +951,8 @@ class PinballScene extends Phaser.Scene {
   }
 
   updateFlippers() {
-    const leftHeld = this.leftPressed || this.keys.left.isDown || this.keys.a.isDown
-    const rightHeld = this.rightPressed || this.keys.right.isDown || this.keys.d.isDown
+    const leftHeld = this.leftPressed || this.screenLeftPressed || this.keys.left.isDown || this.keys.a.isDown
+    const rightHeld = this.rightPressed || this.screenRightPressed || this.keys.right.isDown || this.keys.d.isDown
     for (const [name, state] of this.flipperState) {
       const held = name.includes('_left_') ? leftHeld : rightHeld
       const targetAngle = held ? state.activeAngle : 0
@@ -910,12 +1019,10 @@ class PinballScene extends Phaser.Scene {
       return
     }
 
-    this.ballBody.restitution = params.ballRestitution
-    this.ballBody.friction = PHYSICS_TUNING.ballFriction
-    this.ballBody.frictionAir = PHYSICS_TUNING.ballFrictionAir
+    this.applyBallMaterialTuning()
 
     if (this.keys.space.isDown && this.ballBody.position.y > this.level.height - 190) {
-      this.ballBody.force.y -= PHYSICS_TUNING.launchImpulse
+      this.ballBody.force.y -= LAUNCH_BUTTON_IMPULSE_Y
     }
 
     this.clampBallVelocity()
@@ -1087,8 +1194,89 @@ class PinballScene extends Phaser.Scene {
     }
 
     const cappedForce = Math.min(force, maxForce)
-    this.ballBody.force.x += (dx / distance) * cappedForce
-    this.ballBody.force.y += (dy / distance) * cappedForce
+    let nx = dx / distance
+    let ny = dy / distance
+
+    const kind = body.plugin?.kind
+    if (kind === 'bumper' && params.bumperGoalBias > 0) {
+      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const gx = goalCenter.x - this.ballBody.position.x
+      const gy = goalCenter.y - this.ballBody.position.y
+      const goalLength = Math.max(Math.hypot(gx, gy), 1)
+      const bias = Phaser.Math.Clamp(params.bumperGoalBias, 0, 0.95)
+      nx = nx * (1 - bias) + (gx / goalLength) * bias
+      ny = ny * (1 - bias) + (gy / goalLength) * bias
+      const normalizedLength = Math.max(Math.hypot(nx, ny), 1)
+      nx /= normalizedLength
+      ny /= normalizedLength
+    }
+
+    if (kind === 'flipper' && params.flipperGoalBias > 0) {
+      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const gx = goalCenter.x - this.ballBody.position.x
+      const gy = goalCenter.y - this.ballBody.position.y
+      const goalLength = Math.max(Math.hypot(gx, gy), 1)
+      const bias = Phaser.Math.Clamp(params.flipperGoalBias, 0, 0.95)
+      nx = nx * (1 - bias) + (gx / goalLength) * bias
+      ny = ny * (1 - bias) + (gy / goalLength) * bias
+      const normalizedLength = Math.max(Math.hypot(nx, ny), 1)
+      nx /= normalizedLength
+      ny /= normalizedLength
+    }
+
+    if (kind === 'goalkeeper' && params.goalkeeperGoalAvoidBias > 0) {
+      const goalCenter = { x: this.level.width * 0.5, y: this.level.height * 0.26 }
+      const awayX = this.ballBody.position.x - goalCenter.x
+      const awayY = this.ballBody.position.y - goalCenter.y
+      const awayLength = Math.max(Math.hypot(awayX, awayY), 1)
+      const bias = Phaser.Math.Clamp(params.goalkeeperGoalAvoidBias, 0, 0.95)
+      nx = nx * (1 - bias) + (awayX / awayLength) * bias
+      ny = ny * (1 - bias) + (awayY / awayLength) * bias
+      const normalizedLength = Math.max(Math.hypot(nx, ny), 1)
+      nx /= normalizedLength
+      ny /= normalizedLength
+    }
+
+    if (kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') {
+      const speed = Math.hypot(this.ballBody.velocity.x, this.ballBody.velocity.y)
+      const lowSpeedThreshold = Math.max(
+        0.5,
+        kind === 'player'
+          ? params.playerLowSpeedThreshold
+          : kind === 'goalkeeper'
+            ? params.goalkeeperLowSpeedThreshold
+            : params.bumperLowSpeedThreshold,
+      )
+      const lowSpeedBoost = Phaser.Math.Clamp((lowSpeedThreshold - speed) / lowSpeedThreshold, 0, 1)
+      const weakHitBoost = Math.max(
+        0,
+        kind === 'player'
+          ? params.playerWeakHitBoost
+          : kind === 'goalkeeper'
+            ? params.goalkeeperWeakHitBoost
+            : params.bumperWeakHitBoost,
+      )
+      const velocityKickScale = Math.max(
+        0,
+        kind === 'player'
+          ? params.playerVelocityKick
+          : kind === 'goalkeeper'
+            ? params.goalkeeperVelocityKick
+            : params.bumperVelocityKick,
+      )
+      const baseImpulse = Math.max(0.001, force)
+      const boostedForce = cappedForce * (1 + lowSpeedBoost * weakHitBoost)
+      const velocityKick = (boostedForce / baseImpulse) * velocityKickScale
+      this.ballBody.force.x += nx * boostedForce
+      this.ballBody.force.y += ny * boostedForce
+      MatterBody.setVelocity(this.ballBody, {
+        x: this.ballBody.velocity.x + nx * velocityKick,
+        y: this.ballBody.velocity.y + ny * velocityKick,
+      })
+    } else {
+      this.ballBody.force.x += nx * cappedForce
+      this.ballBody.force.y += ny * cappedForce
+    }
     this.clampBallVelocity()
   }
 
@@ -1195,7 +1383,7 @@ class PinballScene extends Phaser.Scene {
       return
     }
 
-    const points = this.getRenderPoints(object)
+    const points = object.kind === 'bumper' ? this.getBumperRenderPoints(object) : this.getRenderPoints(object)
     if (!points?.length) {
       return
     }
@@ -1247,9 +1435,93 @@ class PinballScene extends Phaser.Scene {
 
   getRenderPoints(object) {
     if (this.mode === 'play' && (object.kind === 'flipper' || object.kind === 'goalkeeper')) {
-      return this.getRuntimeSourcePoints(object)
+      const runtimePoints = this.getRuntimeSourcePoints(object)
+      if (object.kind === 'goalkeeper') {
+        return this.applyCharacterHitOffset(object, runtimePoints)
+      }
+      return runtimePoints
+    }
+    if (this.mode === 'play' && object.kind === 'player') {
+      return this.applyCharacterHitOffset(object, object.points)
     }
     return object.points
+  }
+
+  getBumperRenderPoints(object) {
+    const points = this.getRenderPoints(object)
+    if (!points?.length || this.mode !== 'play') {
+      return points
+    }
+    const hit = this.bumperHitEffects.get(object.name)
+    if (!hit) {
+      return points
+    }
+    const remaining = hit.endsAt - this.time.now
+    if (remaining <= 0) {
+      this.bumperHitEffects.delete(object.name)
+      return points
+    }
+    const t = remaining / hit.durationMs
+    const squash = hit.scale * t
+    const center = polygonCenter(points)
+    const factor = Math.max(0.75, 1 - squash)
+    return points.map((point) => ({
+      x: center.x + (point.x - center.x) * factor,
+      y: center.y + (point.y - center.y) * factor,
+    }))
+  }
+
+  markBumperHit(levelName) {
+    if (!levelName) {
+      return
+    }
+    const durationMs = Math.max(16, params.bumperHitDurationMs)
+    this.bumperHitEffects.set(levelName, {
+      endsAt: this.time.now + durationMs,
+      durationMs,
+      scale: Phaser.Math.Clamp(params.bumperHitScale, 0, 0.4),
+    })
+  }
+
+  applyCharacterHitOffset(object, points) {
+    if (!points?.length) {
+      return points
+    }
+    const hit = this.characterHitEffects.get(object.name)
+    if (!hit) {
+      return points
+    }
+    const remaining = hit.endsAt - this.time.now
+    if (remaining <= 0) {
+      this.characterHitEffects.delete(object.name)
+      return points
+    }
+    const progress = Phaser.Math.Clamp(1 - remaining / hit.durationMs, 0, 1)
+    const pulse = progress < 0.5 ? progress * 2 : (1 - progress) * 2
+    const offset = hit.offsetPx * pulse
+    return points.map((point) => ({
+      x: point.x + hit.dirX * offset,
+      y: point.y + hit.dirY * offset,
+    }))
+  }
+
+  markCharacterHit(levelName, kind) {
+    if (!levelName || !this.ballBody) {
+      return
+    }
+    const velocity = this.ballBody.velocity
+    const length = Math.max(Math.hypot(velocity.x, velocity.y), 0.0001)
+    const dirX = velocity.x / length
+    const dirY = velocity.y / length
+    const durationMs = Math.max(20, kind === 'goalkeeper' ? params.goalkeeperHitDurationMs : params.playerHitDurationMs)
+    const offsetPx = Math.max(0, kind === 'goalkeeper' ? params.goalkeeperHitOffsetPx : params.playerHitOffsetPx)
+    this.characterHitEffects.set(levelName, {
+      endsAt: this.time.now + durationMs,
+      durationMs,
+      dirX,
+      dirY,
+      offsetPx,
+    })
   }
 
   getRuntimeSourcePoints(object) {
@@ -1499,12 +1771,12 @@ const game = new Phaser.Game({
     default: 'matter',
     matter: {
       gravity: { x: 0, y: params.gravityY },
-      positionIterations: PHYSICS_TUNING.positionIterations,
-      velocityIterations: PHYSICS_TUNING.velocityIterations,
-      constraintIterations: PHYSICS_TUNING.constraintIterations,
+      positionIterations: ENGINE_PHYSICS_DEFAULTS.positionIterations,
+      velocityIterations: ENGINE_PHYSICS_DEFAULTS.velocityIterations,
+      constraintIterations: ENGINE_PHYSICS_DEFAULTS.constraintIterations,
       runner: {
-        fps: PHYSICS_TUNING.runnerFps,
-        maxUpdates: PHYSICS_TUNING.maxSubsteps,
+        fps: ENGINE_PHYSICS_DEFAULTS.runnerFps,
+        maxUpdates: ENGINE_PHYSICS_DEFAULTS.maxSubsteps,
       },
       debug: true,
     },
@@ -1519,27 +1791,60 @@ const game = new Phaser.Game({
 
 const pane = new Pane({ title: 'Physics Debug' })
 pane.element.classList.add('debug-pane')
-pane.addBinding(params, 'gravityY', { min: 0.2, max: 2.2, step: 0.01, label: 'Gravity Y' })
-pane.addBinding(params, 'maxBallSpeed', { min: 6, max: 24, step: 0.5, label: 'Max Ball Speed' })
-pane.addBinding(params, 'ballRestitution', { min: 0.2, max: 0.95, step: 0.01, label: 'Ball Rest.' })
-pane.addBinding(params, 'bumperRestitution', { min: 0.5, max: 1, step: 0.01, label: 'Bumper Rest.' })
-pane.addBinding(params, 'wallRestitution', { min: 0.1, max: 0.85, step: 0.01, label: 'Wall Rest.' })
-pane.addBinding(params, 'bumperImpulse', { min: 0.002, max: 0.018, step: 0.001, label: 'Bumper Impulse' })
-pane.addBinding(params, 'flipperSpeed', { min: 0.03, max: 0.4, step: 0.01, label: 'Flipper Speed' })
-pane.addBinding(params, 'flipperKick', { min: 0.004, max: 0.05, step: 0.001, label: 'Flipper Kick' })
-pane.addBinding(params, 'goalkeeperSpeed', { min: 20, max: 180, step: 1, label: 'Keeper Speed' })
-pane.addBinding(params, 'launchForceMin', { min: 0.002, max: 0.05, step: 0.001, label: 'Serve Force Min' })
-pane.addBinding(params, 'launchForceMax', { min: 0.002, max: 0.05, step: 0.001, label: 'Serve Force Max' })
-pane.addBinding(params, 'launchDelayMs', { min: 0, max: 1200, step: 25, label: 'Serve Delay' })
-pane.addBinding(params, 'launchXMin', { min: -1, max: 0, step: 0.01, label: 'Serve X Min' })
-pane.addBinding(params, 'launchXMax', { min: 0, max: 1, step: 0.01, label: 'Serve X Max' })
-pane.addBinding(params, 'launchXDeadZone', { min: 0, max: 0.25, step: 0.005, label: 'Serve X Dead' })
+pane.element.classList.add('is-hidden')
+window.physicsPane = pane
+const worldFolder = pane.addFolder({ title: 'World' })
+worldFolder.addBinding(params, 'gravityY', { min: 0.2, max: 2.2, step: 0.01, label: 'Gravity Y' })
+worldFolder.addBinding(params, 'maxBallSpeed', { min: 4, max: 40, step: 0.5, label: 'Max Ball Speed' })
+worldFolder.addBinding(params, 'goalkeeperSpeed', { min: 20, max: 180, step: 1, label: 'Keeper Speed' })
+
+const ballFolder = pane.addFolder({ title: 'Ball' })
+const ballRadiusBinding = ballFolder.addBinding(params, 'ballRadius', { min: 4, max: 32, step: 0.5, label: 'Radius' })
+ballFolder.addBinding(params, 'ballDensity', { min: 0.0001, max: 0.03, step: 0.0001, label: 'Density' })
+ballFolder.addBinding(params, 'ballFriction', { min: 0, max: 0.15, step: 0.001, label: 'Friction' })
+ballFolder.addBinding(params, 'ballFrictionAir', { min: 0, max: 0.08, step: 0.0005, label: 'Air Friction' })
+ballFolder.addBinding(params, 'ballRestitution', { min: 0.1, max: 1.3, step: 0.01, label: 'Restitution' })
+
+const bumpersFolder = pane.addFolder({ title: 'Bumpers' })
+bumpersFolder.addBinding(params, 'bumperRestitution', { min: 0.3, max: 1.8, step: 0.01, label: 'Restitution' })
+bumpersFolder.addBinding(params, 'bumperImpulse', { min: 0, max: 0.08, step: 0.001, label: 'Impulse' })
+bumpersFolder.addBinding(params, 'bumperGoalBias', { min: 0, max: 0.95, step: 0.01, label: 'Goal Bias' })
+bumpersFolder.addBinding(params, 'bumperWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' })
+bumpersFolder.addBinding(params, 'bumperVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' })
+bumpersFolder.addBinding(params, 'bumperLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' })
+bumpersFolder.addBinding(params, 'bumperHitScale', { min: 0, max: 0.4, step: 0.01, label: 'Hit Squash' })
+bumpersFolder.addBinding(params, 'bumperHitDurationMs', { min: 16, max: 240, step: 4, label: 'Hit Duration' })
+
+const playersFolder = pane.addFolder({ title: 'Players' })
+playersFolder.addBinding(params, 'playerImpulse', { min: 0, max: 0.08, step: 0.001, label: 'Impulse' })
+playersFolder.addBinding(params, 'playerWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' })
+playersFolder.addBinding(params, 'playerVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' })
+playersFolder.addBinding(params, 'playerLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' })
+playersFolder.addBinding(params, 'playerHitOffsetPx', { min: 0, max: 24, step: 1, label: 'Hit Offset Px' })
+playersFolder.addBinding(params, 'playerHitDurationMs', { min: 20, max: 260, step: 5, label: 'Hit Duration' })
+
+const goalkeeperFolder = pane.addFolder({ title: 'Goalkeeper' })
+goalkeeperFolder.addBinding(params, 'goalkeeperImpulse', { min: 0, max: 0.1, step: 0.001, label: 'Impulse' })
+goalkeeperFolder.addBinding(params, 'goalkeeperWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' })
+goalkeeperFolder.addBinding(params, 'goalkeeperVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' })
+goalkeeperFolder.addBinding(params, 'goalkeeperLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' })
+goalkeeperFolder.addBinding(params, 'goalkeeperGoalAvoidBias', { min: 0, max: 0.95, step: 0.01, label: 'Avoid Goal Bias' })
+goalkeeperFolder.addBinding(params, 'goalkeeperHitOffsetPx', { min: 0, max: 28, step: 1, label: 'Hit Offset Px' })
+goalkeeperFolder.addBinding(params, 'goalkeeperHitDurationMs', { min: 20, max: 280, step: 5, label: 'Hit Duration' })
+
+const flippersFolder = pane.addFolder({ title: 'Flippers' })
+flippersFolder.addBinding(params, 'flipperSpeed', { min: 0.02, max: 0.7, step: 0.01, label: 'Speed' })
+flippersFolder.addBinding(params, 'flipperKick', { min: 0, max: 0.09, step: 0.001, label: 'Kick' })
+flippersFolder.addBinding(params, 'flipperGoalBias', { min: 0, max: 0.95, step: 0.01, label: 'Goal Bias' })
+
+const collisionsFolder = pane.addFolder({ title: 'Collisions' })
+collisionsFolder.addBinding(params, 'wallRestitution', { min: 0.05, max: 1.2, step: 0.01, label: 'Wall Rest.' })
 for (const binding of [
-  pane.addBinding(params, 'wallPadding', { min: 4, max: 20, step: 1, label: 'Wall Padding' }),
-  pane.addBinding(params, 'goalPadding', { min: 2, max: 16, step: 1, label: 'Goal Padding' }),
-  pane.addBinding(params, 'playerPadding', { min: 0, max: 8, step: 1, label: 'Player Padding' }),
-  pane.addBinding(params, 'bumperPadding', { min: 0, max: 8, step: 1, label: 'Bumper Padding' }),
-  pane.addBinding(params, 'flipperPadding', { min: 0, max: 3, step: 0.5, label: 'Flipper Padding' }),
+  collisionsFolder.addBinding(params, 'wallPadding', { min: 4, max: 20, step: 1, label: 'Wall Padding' }),
+  collisionsFolder.addBinding(params, 'goalPadding', { min: 2, max: 16, step: 1, label: 'Goal Padding' }),
+  collisionsFolder.addBinding(params, 'playerPadding', { min: 0, max: 8, step: 1, label: 'Player Padding' }),
+  collisionsFolder.addBinding(params, 'bumperPadding', { min: 0, max: 8, step: 1, label: 'Bumper Padding' }),
+  collisionsFolder.addBinding(params, 'flipperPadding', { min: 0, max: 3, step: 0.5, label: 'Flipper Padding' }),
 ]) {
   binding.on('change', () => {
     if (window.pinballScene?.mode === 'play') {
@@ -1547,17 +1852,35 @@ for (const binding of [
     }
   })
 }
-pane.addBinding(params, 'showVisualShapes', { label: 'Visual SVG' })
-pane.addBinding(params, 'showMatterBodies', { label: 'Matter Bodies' })
-pane.addBinding(params, 'showSafetyBodies', { label: 'Safety Bodies' })
-pane.addBinding(params, 'showAlignmentCompare', { label: 'Compare Align' })
-pane.addBinding(params, 'freezePhysics', { label: 'Freeze Physics' })
+
+const serveFolder = pane.addFolder({ title: 'Serve' })
+serveFolder.addBinding(params, 'launchForceMin', { min: 0, max: 0.12, step: 0.001, label: 'Force Min' })
+serveFolder.addBinding(params, 'launchForceMax', { min: 0, max: 0.12, step: 0.001, label: 'Force Max' })
+serveFolder.addBinding(params, 'launchDelayMs', { min: 0, max: 1200, step: 25, label: 'Delay' })
+serveFolder.addBinding(params, 'launchXMin', { min: -1, max: 0.5, step: 0.01, label: 'X Min' })
+serveFolder.addBinding(params, 'launchXMax', { min: -0.5, max: 1, step: 0.01, label: 'X Max' })
+serveFolder.addBinding(params, 'launchXDeadZone', { min: 0, max: 0.5, step: 0.005, label: 'X Dead' })
+
+const debugFolder = pane.addFolder({ title: 'Debug' })
+debugFolder.addBinding(params, 'showVisualShapes', { label: 'Visual SVG' })
+debugFolder.addBinding(params, 'showMatterBodies', { label: 'Matter Bodies' })
+debugFolder.addBinding(params, 'showSafetyBodies', { label: 'Safety Bodies' })
+debugFolder.addBinding(params, 'showAlignmentCompare', { label: 'Compare Align' })
+debugFolder.addBinding(params, 'freezePhysics', { label: 'Freeze Physics' })
+
+ballRadiusBinding.on('change', () => {
+  if (window.pinballScene?.mode === 'play') {
+    window.pinballScene.rebuildBallBody()
+  }
+})
 pane.on('change', () => {
   savePhysicsConfigToStorage(params)
   if (window.pinballScene) {
     window.pinballScene.syncPhysicsTextarea()
   }
 })
+
+setTuningOpen(false)
 
 if (window.pinballScene) {
   window.pinballScene.syncPhysicsTextarea()

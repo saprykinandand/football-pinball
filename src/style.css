@@ -33,7 +33,18 @@ body,
   gap: 8px;
 }
 
+.quick-controls {
+  width: min(100%, 375px);
+  display: flex;
+  gap: 10px;
+}
+
+.quick-controls button {
+  flex: 1;
+}
+
 .toolbar button,
+.quick-controls button,
 .touch-controls button {
   border: 1px solid #c7e8c0;
   border-radius: 8px;
@@ -45,6 +56,7 @@ body,
 }
 
 .toolbar button:active,
+.quick-controls button:active,
 .touch-controls button:active {
   background: #49a862;
 }
@@ -142,6 +154,24 @@ body,
   top: 8px;
   right: 8px;
   z-index: 10;
+  max-height: calc(100svh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.debug-pane.is-hidden {
+  display: none;
+}
+
+#app:not(.tuning-open) .toolbar,
+#app:not(.tuning-open) .editor-column,
+#app:not(.tuning-open) .touch-controls {
+  display: none;
+}
+
+#app:not(.tuning-open) .game-row {
+  width: min(100%, 375px);
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 760px) {
