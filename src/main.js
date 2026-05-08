@@ -2,7 +2,7 @@ import './style.css'
 import Phaser from 'phaser'
 import { Pane } from 'tweakpane'
 import { DEFAULT_LEVEL } from './defaultLevel.js'
-import { PHYSICS_TUNING, createDefaultParams } from './config/physicsTuning.js'
+import { DEFAULT_PHYSICS_CONFIG, PHYSICS_TUNING, createDefaultParams } from './config/physicsTuning.js'
 import {
   clearStoredLevel,
   clone,
@@ -25,6 +25,8 @@ app.innerHTML = `
       <button id="save-layout">Save Layout</button>
       <button id="export-layout">Export JSON</button>
       <button id="import-layout">Import JSON</button>
+      <button id="export-physics">Export Physics Config</button>
+      <button id="import-physics">Import Physics Config</button>
       <button id="reset-layout">Reset SVG Layout</button>
       <button id="reset-ball">Reset Ball</button>
       <button id="serve-ball">Serve Ball</button>
@@ -34,7 +36,10 @@ app.innerHTML = `
     </div>
     <div class="game-row">
       <div id="game-container"></div>
-      <textarea id="layout-json" spellcheck="false"></textarea>
+      <div class="editor-column">
+        <textarea id="layout-json" spellcheck="false"></textarea>
+        <textarea id="physics-json" spellcheck="false"></textarea>
+      </div>
     </div>
     <div class="touch-controls">
       <button id="left-flip">Left Flipper</button>
@@ -44,7 +49,56 @@ app.innerHTML = `
   </div>
 `
 
+const PHYSICS_STORAGE_KEY = 'football-pinball.physics-config.v1'
+const PHYSICS_PARAM_TYPES = Object.fromEntries(
+  Object.entries(DEFAULT_PHYSICS_CONFIG).map(([key, value]) => [key, typeof value]),
+)
+
+function applyPhysicsConfig(target, source) {
+  if (!source || typeof source !== 'object') {
+    return false
+  }
+  let changed = false
+  for (const [key, expectedType] of Object.entries(PHYSICS_PARAM_TYPES)) {
+    const value = source[key]
+    if (typeof value === expectedType) {
+      target[key] = value
+      changed = true
+    }
+  }
+  return changed
+}
+
+function readStoredPhysicsConfig() {
+  const raw = localStorage.getItem(PHYSICS_STORAGE_KEY)
+  if (!raw) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function exportPhysicsConfigJson(sourceParams) {
+  const clean = {}
+  for (const key of Object.keys(DEFAULT_PHYSICS_CONFIG)) {
+    clean[key] = sourceParams[key]
+  }
+  return JSON.stringify(clean, null, 2)
+}
+
+function savePhysicsConfigToStorage(sourceParams) {
+  localStorage.setItem(PHYSICS_STORAGE_KEY, exportPhysicsConfigJson(sourceParams))
+}
+
 const params = createDefaultParams()
+applyPhysicsConfig(params, readStoredPhysicsConfig())
 
 function colorToNumber(color) {
   return Number.parseInt(String(color || '#FFFFFF').replace('#', ''), 16)
@@ -183,6 +237,7 @@ class PinballScene extends Phaser.Scene {
     this.bindPhysicsEvents()
     this.rebuildPlayBodies()
     this.syncTextarea()
+    this.syncPhysicsTextarea()
     this.updateModeUi()
   }
 
@@ -349,6 +404,36 @@ class PinballScene extends Phaser.Scene {
         this.rebuildForMode()
         this.updateSelectionUi()
         this.setStatus('JSON imported')
+      } catch {
+        this.setStatus('Import failed: invalid JSON')
+      }
+    }
+    document.querySelector('#export-physics').onclick = async () => {
+      const json = exportPhysicsConfigJson(params)
+      document.querySelector('#physics-json').value = json
+      savePhysicsConfigToStorage(params)
+      try {
+        await navigator.clipboard.writeText(json)
+        this.setStatus('Physics config copied to clipboard')
+      } catch {
+        this.setStatus('Physics config exported to textarea')
+      }
+    }
+    document.querySelector('#import-physics').onclick = () => {
+      try {
+        const parsed = JSON.parse(document.querySelector('#physics-json').value)
+        const changed = applyPhysicsConfig(params, parsed)
+        if (!changed) {
+          this.setStatus('Import failed: no valid physics keys')
+          return
+        }
+        savePhysicsConfigToStorage(params)
+        this.syncPhysicsTextarea()
+        pane.refresh()
+        if (this.mode === 'play') {
+          this.rebuildPlayBodies()
+        }
+        this.setStatus('Physics config imported and saved')
       } catch {
         this.setStatus('Import failed: invalid JSON')
       }
@@ -1398,6 +1483,10 @@ class PinballScene extends Phaser.Scene {
   syncTextarea() {
     document.querySelector('#layout-json').value = this.exportLevelJson()
   }
+
+  syncPhysicsTextarea() {
+    document.querySelector('#physics-json').value = exportPhysicsConfigJson(params)
+  }
 }
 
 const game = new Phaser.Game({
@@ -1463,6 +1552,17 @@ pane.addBinding(params, 'showMatterBodies', { label: 'Matter Bodies' })
 pane.addBinding(params, 'showSafetyBodies', { label: 'Safety Bodies' })
 pane.addBinding(params, 'showAlignmentCompare', { label: 'Compare Align' })
 pane.addBinding(params, 'freezePhysics', { label: 'Freeze Physics' })
+pane.on('change', () => {
+  savePhysicsConfigToStorage(params)
+  if (window.pinballScene) {
+    window.pinballScene.syncPhysicsTextarea()
+  }
+})
+
+if (window.pinballScene) {
+  window.pinballScene.syncPhysicsTextarea()
+}
+document.querySelector('#physics-json').value = exportPhysicsConfigJson(params)
 
 window.addEventListener('beforeunload', () => {
   game.destroy(true)

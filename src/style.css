@@ -100,8 +100,31 @@ body,
   font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+#physics-json {
+  width: 100%;
+  min-height: 220px;
+  max-height: calc(100svh - 150px);
+  resize: vertical;
+  border: 1px solid #315f3b;
+  border-radius: 8px;
+  padding: 10px;
+  background: #071a0e;
+  color: #d8f6d0;
+  font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#physics-json::placeholder {
+  color: #8eb394;
+}
+
 #layout-json.is-editing {
   border-color: #c7e8c0;
+}
+
+.editor-column {
+  display: grid;
+  grid-template-rows: minmax(240px, 1fr) minmax(140px, 0.6fr);
+  gap: 10px;
 }
 
 .touch-controls {
@@ -133,6 +156,10 @@ body,
 
   #layout-json {
     min-height: 180px;
+  }
+
+  #physics-json {
+    min-height: 140px;
   }
 
   #selected-name {
