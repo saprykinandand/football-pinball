@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { DEFAULT_PHYSICS_CONFIG, ENGINE_PHYSICS_DEFAULTS } from '../config/physicsTuning.js'
+import { DEFAULT_PHYSICS_CONFIG } from '../config/physicsTuning.js'
 import { params } from '../config/runtimeParams.js'
 import { exportPhysicsConfigJson, savePhysicsConfigToStorage } from '../config/physicsStore.js'
 import { bindAppControls } from '../ui/appShell.js'
@@ -15,6 +15,18 @@ import {
   getBodyBounds as getMatterBodyBounds,
   matterCentroid,
 } from '../physics/bodyFactory.js'
+import {
+  applyBallMaterialTuning as applyRuntimeBallMaterialTuning,
+  applyBodyTuning as applyRuntimeBodyTuning,
+  applyFreezeState as applyRuntimeFreezeState,
+  applySolverTuning as applyRuntimeSolverTuning,
+  freezeBall as freezeRuntimeBall,
+  safetyRestitutionFor as runtimeSafetyRestitutionFor,
+  setBodyDebugVisible as setRuntimeBodyDebugVisible,
+  setBodyRestitution as setRuntimeBodyRestitution,
+  updateDebugVisibility as updateRuntimeDebugVisibility,
+} from '../physics/physicsRuntime.js'
+import { bindControls as bindInputControls, isFlipperHeld as isInputFlipperHeld } from '../systems/inputSystem.js'
 import { updateFlippers as updateFlipperSystem } from '../systems/flipperSystem.js'
 import {
   playerMovementArcY as getPlayerMovementArcY,
@@ -22,6 +34,15 @@ import {
   updatePlayers as updatePlayerSystem,
 } from '../systems/playerSystem.js'
 import { updateGoalkeeper as updateGoalkeeperSystem } from '../systems/goalkeeperSystem.js'
+import {
+  clampBallVelocity as clampBallVelocitySystem,
+  createBallBody as createBallBodySystem,
+  getBallRadius as getBallRadiusSystem,
+  markBallSquash as markBallSquashSystem,
+  rebuildBallBody as rebuildBallBodySystem,
+  updateBall as updateBallSystem,
+  updateBallVisualSpin as updateBallVisualSpinSystem,
+} from '../systems/ballSystem.js'
 import {
   applyLaunchImpulse as applyServeLaunchImpulse,
   cancelPendingServe as cancelPendingServeSystem,
@@ -57,8 +78,6 @@ import {
   translateObject as translateEditObject,
 } from '../systems/editSystem.js'
 
-const MatterBody = Phaser.Physics.Matter.Matter.Body
-const LAUNCH_BUTTON_IMPULSE_Y = 0.012
 const GAME_VIEW_HEIGHT = 540
 
 export class PinballScene extends Phaser.Scene {
@@ -174,25 +193,11 @@ export class PinballScene extends Phaser.Scene {
   }
 
   applySolverTuning() {
-    const engine = this.matter.world.engine
-    engine.positionIterations = ENGINE_PHYSICS_DEFAULTS.positionIterations
-    engine.velocityIterations = ENGINE_PHYSICS_DEFAULTS.velocityIterations
-    engine.constraintIterations = ENGINE_PHYSICS_DEFAULTS.constraintIterations
+    applyRuntimeSolverTuning(this)
   }
 
   applyBodyTuning() {
-    for (const body of this.playBodies) {
-      const kind = body.plugin?.kind
-      if (body.plugin?.safety) {
-        this.setBodyRestitution(body, this.safetyRestitutionFor(kind))
-        continue
-      }
-      if (kind === 'bumper' || kind === 'player' || kind === 'goalkeeper') {
-        this.setBodyRestitution(body, params.bumperRestitution)
-      } else if (kind === 'field_base' || kind === 'field_collision' || kind === 'goal_collision') {
-        this.setBodyRestitution(body, params.wallRestitution)
-      }
-    }
+    applyRuntimeBodyTuning(this)
   }
 
   onTuningChanged() {
@@ -205,160 +210,35 @@ export class PinballScene extends Phaser.Scene {
   }
 
   applyFreezeState() {
-    if (!this.ballBody || this.ballFrozen === params.freezePhysics) {
-      return
-    }
-
-    this.ballFrozen = params.freezePhysics
-    MatterBody.setStatic(this.ballBody, params.freezePhysics)
-    if (!params.freezePhysics) {
-      this.applyBallMaterialTuning()
-    }
+    applyRuntimeFreezeState(this)
   }
 
   applyBallMaterialTuning() {
-    if (!this.ballBody) {
-      return
-    }
-    this.ballBody.restitution = params.ballRestitution
-    this.ballBody.friction = params.ballFriction
-    this.ballBody.frictionAir = params.ballFrictionAir
-    if (Number.isFinite(params.ballDensity) && params.ballDensity > 0 && this.ballBody.density !== params.ballDensity) {
-      MatterBody.setDensity(this.ballBody, params.ballDensity)
-    }
+    applyRuntimeBallMaterialTuning(this)
   }
 
   freezeBall() {
-    this.applyFreezeState()
-    if (!this.ballBody) {
-      return
-    }
-    MatterBody.setVelocity(this.ballBody, { x: 0, y: 0 })
-    MatterBody.setAngularVelocity(this.ballBody, 0)
+    freezeRuntimeBall(this)
   }
 
   setBodyRestitution(body, restitution) {
-    const parts = body.parts?.length ? body.parts : [body]
-    for (const part of parts) {
-      part.restitution = restitution
-    }
-    body.restitution = restitution
+    setRuntimeBodyRestitution(body, restitution)
   }
 
   safetyRestitutionFor(kind) {
-    if (kind === 'field_base' || kind === 'field_collision' || kind === 'goal_collision') {
-      return params.wallRestitution
-    }
-    return Math.min(params.wallRestitution, 0.5)
+    return runtimeSafetyRestitutionFor(kind)
   }
 
   updateDebugVisibility(force = false) {
-    const shouldDrawDebug = Boolean(params.debugMatterEnabled || params.showMatterBodies || params.showSafetyBodies)
-    const key = [
-      shouldDrawDebug,
-      params.showMatterBodies,
-      params.showSafetyBodies,
-      this.playBodies.length,
-    ].join(':')
-    if (!force && key === this.debugVisibilityKey) {
-      return
-    }
-    this.debugVisibilityKey = key
-
-    if (shouldDrawDebug && !this.matter.world.debugGraphic) {
-      this.matter.world.createDebugGraphic()
-    }
-
-    this.matter.world.drawDebug = shouldDrawDebug
-    if (this.matter.world.debugGraphic) {
-      this.matter.world.debugGraphic.visible = shouldDrawDebug
-      if (!shouldDrawDebug) {
-        this.matter.world.debugGraphic.clear()
-      }
-    }
-
-    for (const body of this.playBodies) {
-      const isSafety = Boolean(body.plugin?.safety)
-      this.setBodyDebugVisible(body, shouldDrawDebug && (isSafety ? params.showSafetyBodies : params.showMatterBodies))
-    }
+    updateRuntimeDebugVisibility(this, force)
   }
 
   setBodyDebugVisible(body, visible) {
-    const parts = body.parts?.length ? body.parts : [body]
-    for (const part of parts) {
-      part.render.visible = visible
-    }
-    body.render.visible = visible
+    setRuntimeBodyDebugVisible(body, visible)
   }
 
   bindControls() {
-    // Allow multi-touch so left and right flippers can be held together on phones.
-    this.input.addPointer(3)
-
-    this.keys = this.input.keyboard.addKeys({
-      left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      a: Phaser.Input.Keyboard.KeyCodes.A,
-      d: Phaser.Input.Keyboard.KeyCodes.D,
-      q: Phaser.Input.Keyboard.KeyCodes.Q,
-      e: Phaser.Input.Keyboard.KeyCodes.E,
-      space: Phaser.Input.Keyboard.KeyCodes.SPACE,
-      r: Phaser.Input.Keyboard.KeyCodes.R,
-    })
-
-    const leftButton = document.querySelector('#left-flip')
-    const rightButton = document.querySelector('#right-flip')
-    leftButton.onpointerdown = () => {
-      this.leftPressed = true
-    }
-    leftButton.onpointerup = () => {
-      this.leftPressed = false
-    }
-    leftButton.onpointerleave = () => {
-      this.leftPressed = false
-    }
-    rightButton.onpointerdown = () => {
-      this.rightPressed = true
-    }
-    rightButton.onpointerup = () => {
-      this.rightPressed = false
-    }
-    rightButton.onpointerleave = () => {
-      this.rightPressed = false
-    }
-
-    const pointerSides = new Map()
-    const clearPointerSide = (pointerId) => {
-      const side = pointerSides.get(pointerId)
-      if (!side) {
-        return
-      }
-      pointerSides.delete(pointerId)
-      this.screenLeftPressed = Array.from(pointerSides.values()).includes('left')
-      this.screenRightPressed = Array.from(pointerSides.values()).includes('right')
-    }
-    this.input.on('pointerdown', (pointer) => {
-      if (this.mode !== 'play') {
-        return
-      }
-      const side = pointer.worldX < this.level.width / 2 ? 'left' : 'right'
-      pointerSides.set(pointer.id, side)
-      if (side === 'left') {
-        this.screenLeftPressed = true
-      } else {
-        this.screenRightPressed = true
-      }
-    })
-    this.input.on('pointerup', (pointer) => {
-      clearPointerSide(pointer.id)
-    })
-    this.input.on('pointerupoutside', (pointer) => {
-      clearPointerSide(pointer.id)
-    })
-
-    this.input.keyboard.on('keydown-Q', () => this.rotateSelected(-5))
-    this.input.keyboard.on('keydown-E', () => this.rotateSelected(5))
-    this.input.keyboard.on('keydown-R', () => this.serveBall())
+    bindInputControls(this)
   }
 
   saveAllJson() {
@@ -721,36 +601,15 @@ export class PinballScene extends Phaser.Scene {
   }
 
   getBallRadius() {
-    return Math.max(this.level.ball.radius || 0, params.ballRadius)
+    return getBallRadiusSystem(this)
   }
 
   createBallBody(spawn) {
-    const ballRadius = this.getBallRadius()
-    this.ballBody = this.matter.add.circle(spawn.x, spawn.y, ballRadius, {
-      label: 'ball',
-      restitution: params.ballRestitution,
-      friction: params.ballFriction,
-      frictionAir: params.ballFrictionAir,
-      density: params.ballDensity,
-      slop: 0.02,
-    })
-    this.ballBody.circleRadius = ballRadius
-    this.playBodies.push(this.ballBody)
-    this.applyBallMaterialTuning()
+    createBallBodySystem(this, spawn)
   }
 
   rebuildBallBody() {
-    if (!this.ballBody) {
-      return
-    }
-    this.cancelPendingServe()
-    this.matter.world.remove(this.ballBody, true)
-    this.playBodies = this.playBodies.filter((body) => body !== this.ballBody)
-    this.ballBody = null
-    this.ballFrozen = null
-    this.createBallBody(this.getBallSpawn())
-    this.applyFreezeState()
-    this.serveBall()
+    rebuildBallBodySystem(this)
   }
 
   paddingForObject(object) {
@@ -807,67 +666,19 @@ export class PinballScene extends Phaser.Scene {
   }
 
   updateBall(delta) {
-    if (!this.ballBody) {
-      return
-    }
-
-    if (this.servePending) {
-      this.resetBallToSpawn()
-      return
-    }
-
-    this.updateBallVisualSpin(delta)
-
-    if (this.keys.space.isDown && this.ballBody.position.y > this.level.height - 190) {
-      this.ballBody.force.y -= LAUNCH_BUTTON_IMPULSE_Y
-    }
-
-    this.clampBallVelocity()
-
-    const margin = this.getBallRadius() * 5
-    if (
-      this.ballBody.position.x < -margin
-      || this.ballBody.position.x > this.level.width + margin
-      || this.ballBody.position.y < -margin
-      || this.ballBody.position.y > this.level.height + margin
-    ) {
-      this.serveBall()
-    }
+    updateBallSystem(this, delta)
   }
 
   updateBallVisualSpin(delta) {
-    const velocity = this.ballBody.velocity
-    const speed = Math.hypot(velocity.x, velocity.y)
-    this.ballImpactSquash = Math.max(0, this.ballImpactSquash - (delta / 1000) * Math.max(0, params.ballSquashRecover))
-    if (speed < 0.02) {
-      return
-    }
-
-    this.ballImpactAngle = Math.atan2(velocity.y, velocity.x)
-    const radius = Math.max(this.getBallRadius(), 1)
-    const spinDirection = Math.abs(velocity.x) > 0.2 ? Math.sign(velocity.x) : Math.sign(velocity.y || 1)
-    this.ballVisualAngle = Phaser.Math.Angle.Wrap(
-      this.ballVisualAngle + spinDirection * (speed / radius) * delta * 0.018,
-    )
+    updateBallVisualSpinSystem(this, delta)
   }
 
   markBallSquash(angle, amount = params.ballImpactSquash) {
-    this.ballImpactAngle = angle
-    this.ballImpactSquash = Math.max(this.ballImpactSquash, Math.max(0, amount))
+    markBallSquashSystem(this, angle, amount)
   }
 
   clampBallVelocity() {
-    const velocity = this.ballBody.velocity
-    const speed = Math.hypot(velocity.x, velocity.y)
-    if (speed <= params.maxBallSpeed) {
-      return
-    }
-
-    const scale = params.maxBallSpeed / speed
-    MatterBody.setVelocity(this.ballBody, {
-      x: velocity.x * scale,
-      y: velocity.y * scale,
-    })
+    clampBallVelocitySystem(this)
   }
 
   resetBall() {
@@ -919,10 +730,7 @@ export class PinballScene extends Phaser.Scene {
   }
 
   isFlipperHeld(name) {
-    if (name.includes('_left_')) {
-      return this.leftPressed || this.screenLeftPressed || this.keys.left.isDown || this.keys.a.isDown
-    }
-    return this.rightPressed || this.screenRightPressed || this.keys.right.isDown || this.keys.d.isDown
+    return isInputFlipperHeld(this, name)
   }
 
   tryKickMovingFlipper(name) {
