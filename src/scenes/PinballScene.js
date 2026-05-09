@@ -7,7 +7,7 @@ import { formatTime } from '../utils/time.js'
 import { PerfOverlay } from '../render/perfOverlay.js'
 import { drawLevel as drawRenderedLevel, markBumperHit as markRenderedBumperHit, markCharacterHit as markRenderedCharacterHit } from '../render/levelRenderer.js'
 import { clone, readStoredLevel, saveStoredLevelJson, serializeLevel } from '../level/levelStore.js'
-import { pointsBounds, polygonCenter } from '../level/geometry.js'
+import { clonePoints, pointsBounds, polygonCenter } from '../level/geometry.js'
 import {
   alignBodyToSourceBounds as alignMatterBodyToSourceBounds,
   createEdgeLoop as createMatterEdgeLoop,
@@ -119,6 +119,12 @@ export class PinballScene extends Phaser.Scene {
     this.objectsByKind = new Map()
     this.staticRenderDirty = true
     this.debugVisibilityKey = ''
+    this.ballRenderCache = null
+    this.renderStats = {
+      staticRedraws: 0,
+      dynamicObjects: 0,
+      ballPointsReused: 0,
+    }
   }
 
   create() {
@@ -128,11 +134,15 @@ export class PinballScene extends Phaser.Scene {
     this.applySolverTuning()
 
     this.staticGraphics = this.add.graphics()
-    this.layoutGraphics = this.add.graphics()
+    this.dynamicGraphics = this.add.graphics()
+    this.ballGraphics = this.add.graphics()
+    this.layoutGraphics = this.dynamicGraphics
     this.editGraphics = this.add.graphics()
     this.staticGraphics.setDepth(0)
-    this.layoutGraphics.setDepth(2)
-    this.editGraphics.setDepth(3)
+    this.dynamicGraphics.setDepth(2)
+    this.ballGraphics.setDepth(3)
+    this.editGraphics.setDepth(4)
+    this.editGraphics.setVisible(false)
     this.perfOverlay = new PerfOverlay(this)
     this.indexLevelObjects()
     this.bindControls()
@@ -445,7 +455,7 @@ export class PinballScene extends Phaser.Scene {
           currentAngle: 0,
           lastAngleStep: 0,
           sourcePoints: object.points,
-          renderPoints: object.points,
+          renderPoints: clonePoints(object.points),
           activeAngle: object.side === 'left' ? -0.85 : 0.85,
           swingKicked: false,
           safetyBodies: flipperSafetyBodies.map((safetyBody) => ({
@@ -486,8 +496,10 @@ export class PinballScene extends Phaser.Scene {
             body,
             baseCenter: matterCentroid(object.points),
             sourcePoints: object.points,
-            renderPoints: object.points,
+            renderPoints: clonePoints(object.points),
             direction: 1,
+            pathBounds: this.goalkeeperPathBounds(),
+            halfWidth: this.goalkeeperHalfWidth(body),
             safetyBodies: safetyBodies.map((safetyBody) => ({
               body: safetyBody,
               basePosition: clone(safetyBody.position),
@@ -498,7 +510,7 @@ export class PinballScene extends Phaser.Scene {
             body,
             baseCenter: matterCentroid(object.points),
             sourcePoints: object.points,
-            renderPoints: object.points,
+            renderPoints: clonePoints(object.points),
             direction: object.side === 'right' ? -1 : 1,
             safetyBodies: safetyBodies.map((safetyBody) => ({
               body: safetyBody,
@@ -536,6 +548,16 @@ export class PinballScene extends Phaser.Scene {
       anchorRight.point.x = axis + (axis - anchorLeft.point.x)
       anchorRight.point.y = anchorLeft.point.y
     }
+  }
+
+  goalkeeperPathBounds() {
+    const path = this.findObject('path_of_goal_keeper')
+    return path?.points ? pointsBounds(path.points) : null
+  }
+
+  goalkeeperHalfWidth(body) {
+    const bounds = pointsBounds(body.vertices)
+    return (bounds.maxX - bounds.minX) / 2
   }
 
   triggerImpactShake(kind = 'impact') {
@@ -767,7 +789,14 @@ export class PinballScene extends Phaser.Scene {
 
   drawLevel() {
     drawRenderedLevel(this)
-    this.drawEditOverlay()
+    if (this.mode === 'edit') {
+      this.editGraphics.setVisible(true)
+      this.editGraphics.clear()
+      this.drawEditOverlay()
+    } else if (this.editGraphics.visible) {
+      this.editGraphics.clear()
+      this.editGraphics.setVisible(false)
+    }
   }
 
   updatePerfVisibility() {
@@ -786,6 +815,9 @@ export class PinballScene extends Phaser.Scene {
       bodyCount: this.playBodies.length,
       debugOn: this.matter.world.drawDebug,
       deferredUpdates: runner.lastUpdatesDeferred || 0,
+      staticRedraws: this.renderStats.staticRedraws,
+      dynamicObjects: this.renderStats.dynamicObjects,
+      ballPointsReused: this.renderStats.ballPointsReused,
     })
   }
 

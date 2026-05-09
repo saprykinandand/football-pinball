@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import { ENGINE_PHYSICS_DEFAULTS } from '../config/physicsTuning.js'
 import { params } from '../config/runtimeParams.js'
-import { rotatePoint } from '../level/geometry.js'
+import { rotatePoint, writeRotatedPoints } from '../level/geometry.js'
 
 const MatterBody = Phaser.Physics.Matter.Matter.Body
 
@@ -20,7 +20,7 @@ export function updateFlippers(scene, delta) {
     const angleStep = Phaser.Math.Clamp(delta, -maxStep, maxStep)
     state.lastAngleStep = angleStep
     state.currentAngle += angleStep
-    state.renderPoints = state.sourcePoints.map((point) => rotatePoint(point, state.anchor, state.currentAngle))
+    writeRotatedPoints(state.renderPoints, state.sourcePoints, state.anchor, state.currentAngle)
     const nextPosition = rotatePoint(state.basePosition, state.anchor, state.currentAngle)
     MatterBody.setPosition(state.body, nextPosition)
     MatterBody.setAngle(state.body, state.baseAngle + state.currentAngle)

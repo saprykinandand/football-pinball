@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { params } from '../config/runtimeParams.js'
-import { pointsBounds, translatePoints } from '../level/geometry.js'
+import { writeTranslatedPoints } from '../level/geometry.js'
 
 const MatterBody = Phaser.Physics.Matter.Matter.Body
 
@@ -9,15 +9,13 @@ export function updateGoalkeeper(scene, delta) {
     return
   }
 
-  const path = scene.findObject('path_of_goal_keeper')
-  if (!path?.points) {
+  const bounds = scene.goalkeeperState.pathBounds
+  if (!bounds) {
     return
   }
 
-  const bounds = pointsBounds(path.points)
   const body = scene.goalkeeperState.body
-  const goalieBounds = pointsBounds(body.vertices)
-  const halfWidth = (goalieBounds.maxX - goalieBounds.minX) / 2
+  const halfWidth = scene.goalkeeperState.halfWidth
   const minX = bounds.minX + halfWidth
   const maxX = bounds.maxX - halfWidth
   const seconds = delta / 1000
@@ -33,7 +31,7 @@ export function updateGoalkeeper(scene, delta) {
 
   MatterBody.setPosition(body, { x: nextX, y: scene.goalkeeperState.baseCenter.y })
   const dx = nextX - scene.goalkeeperState.baseCenter.x
-  scene.goalkeeperState.renderPoints = translatePoints(scene.goalkeeperState.sourcePoints, dx, 0)
+  writeTranslatedPoints(scene.goalkeeperState.renderPoints, scene.goalkeeperState.sourcePoints, dx, 0)
   for (const safety of scene.goalkeeperState.safetyBodies) {
     MatterBody.setPosition(safety.body, {
       x: safety.basePosition.x + dx,

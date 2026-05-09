@@ -56,7 +56,7 @@ export function setupTuningPane(params, getScene) {
   
   const bumpersFolder = addFolder(pane, 'Bumpers')
   addTuningBinding(bumpersFolder, 'bumperRestitution', { min: 0.3, max: 1.8, step: 0.01, label: 'Restitution' }, 'Прыгучесть бамперов. Выше - отскоки от бамперов резче и энергичнее.')
-  addTuningBinding(bumpersFolder, 'bumperImpulse', { min: 0, max: 0.4, step: 0.001, label: 'Impulse' }, 'Дополнительная сила при ударе о бампер. Выше - бампер активнее выталкивает мяч.')
+  addTuningBinding(bumpersFolder, 'bumperImpulse', { min: 0, max: 3, step: 0.001, label: 'Impulse' }, 'Дополнительная сила при ударе о бампер. Выше - бампер активнее выталкивает мяч.')
   addTuningBinding(bumpersFolder, 'bumperGoalBias', { min: 0, max: 0.95, step: 0.01, label: 'Goal Bias' }, 'Насколько удар бампера направляется к воротам. Выше - бампер чаще помогает атаковать.')
   addTuningBinding(bumpersFolder, 'bumperWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' }, 'Усиление слабых ударов, когда мяч медленный. Выше - меньше вялых контактов и застреваний.')
   addTuningBinding(bumpersFolder, 'bumperVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' }, 'Скорость, напрямую добавляемая ударом бампера. Выше - отскоки быстрее, даже без большой силы.')
@@ -70,7 +70,7 @@ export function setupTuningPane(params, getScene) {
   bumpersVisualFolder.addBinding(params, 'bumperHitDurationMs', { min: 16, max: 240, step: 4, label: 'Hit Duration' })
   
   const playersFolder = addFolder(pane, 'Players')
-  addTuningBinding(playersFolder, 'playerImpulse', { min: 0, max: 0.08, step: 0.001, label: 'Impulse' }, 'Дополнительная сила от столкновения с игроком. Выше - игроки сильнее бьют по мячу.')
+  addTuningBinding(playersFolder, 'playerImpulse', { min: 0, max: 3, step: 0.001, label: 'Impulse' }, 'Дополнительная сила от столкновения с игроком. Выше - игроки сильнее бьют по мячу.')
   addTuningBinding(playersFolder, 'playerWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' }, 'Усиление удара игрока, когда мяч медленный. Выше - мягкие контакты становятся полезнее.')
   addTuningBinding(playersFolder, 'playerVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' }, 'Скорость, напрямую добавляемая ударом игрока. Выше - мяч резче меняет направление.')
   addTuningBinding(playersFolder, 'playerLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' }, 'Скорость, ниже которой включается усиление слабого удара игрока. Выше - усиление срабатывает чаще.')
@@ -85,7 +85,7 @@ export function setupTuningPane(params, getScene) {
   
   const goalkeeperFolder = addFolder(pane, 'Goalkeeper')
   goalkeeperFolder.addBinding(params, 'goalkeeperSpeed', { min: 20, max: 180, step: 1, label: 'Speed' })
-  addTuningBinding(goalkeeperFolder, 'goalkeeperImpulse', { min: 0, max: 0.1, step: 0.001, label: 'Impulse' }, 'Дополнительная сила от столкновения с вратарем. Выше - сейвы сильнее выбивают мяч.')
+  addTuningBinding(goalkeeperFolder, 'goalkeeperImpulse', { min: 0, max: 3, step: 0.001, label: 'Impulse' }, 'Дополнительная сила от столкновения с вратарем. Выше - сейвы сильнее выбивают мяч.')
   addTuningBinding(goalkeeperFolder, 'goalkeeperWeakHitBoost', { min: 0, max: 4, step: 0.05, label: 'Weak Hit Boost' }, 'Усиление сейва, когда мяч медленный. Выше - мягкие сейвы увереннее выносят мяч.')
   addTuningBinding(goalkeeperFolder, 'goalkeeperVelocityKick', { min: 0, max: 4, step: 0.05, label: 'Velocity Kick' }, 'Скорость, напрямую добавляемая сейвом. Выше - мяч быстрее отскакивает от вратаря.')
   addTuningBinding(goalkeeperFolder, 'goalkeeperLowSpeedThreshold', { min: 1, max: 20, step: 0.5, label: 'Low Speed Thresh' }, 'Скорость, ниже которой включается усиление сейва. Выше - усиление срабатывает чаще.')

@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { params } from '../config/runtimeParams.js'
-import { translatePoints } from '../level/geometry.js'
+import { writeTranslatedPoints } from '../level/geometry.js'
 
 const MatterBody = Phaser.Physics.Matter.Matter.Body
 
@@ -12,7 +12,7 @@ export function updatePlayers(scene) {
       y: state.baseCenter.y + movement.y,
     }
 
-    state.renderPoints = translatePoints(state.sourcePoints, movement.x, movement.y)
+    writeTranslatedPoints(state.renderPoints, state.sourcePoints, movement.x, movement.y)
     MatterBody.setPosition(state.body, nextPosition)
     for (const safety of state.safetyBodies) {
       MatterBody.setPosition(safety.body, {

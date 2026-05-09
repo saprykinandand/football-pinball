@@ -41,6 +41,22 @@ export function translatePoints(points, dx, dy) {
   return points.map((point) => ({ x: point.x + dx, y: point.y + dy }))
 }
 
+export function clonePoints(points) {
+  return points.map((point) => ({ x: point.x, y: point.y }))
+}
+
+export function writeTranslatedPoints(target, source, dx, dy) {
+  for (let index = 0; index < source.length; index += 1) {
+    const sourcePoint = source[index]
+    const targetPoint = target[index] || { x: 0, y: 0 }
+    targetPoint.x = sourcePoint.x + dx
+    targetPoint.y = sourcePoint.y + dy
+    target[index] = targetPoint
+  }
+  target.length = source.length
+  return target
+}
+
 export function rotatePoint(point, center, radians) {
   const cos = Math.cos(radians)
   const sin = Math.sin(radians)
@@ -50,6 +66,22 @@ export function rotatePoint(point, center, radians) {
     x: center.x + x * cos - y * sin,
     y: center.y + x * sin + y * cos,
   }
+}
+
+export function writeRotatedPoints(target, source, center, radians) {
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  for (let index = 0; index < source.length; index += 1) {
+    const sourcePoint = source[index]
+    const targetPoint = target[index] || { x: 0, y: 0 }
+    const x = sourcePoint.x - center.x
+    const y = sourcePoint.y - center.y
+    targetPoint.x = center.x + x * cos - y * sin
+    targetPoint.y = center.y + x * sin + y * cos
+    target[index] = targetPoint
+  }
+  target.length = source.length
+  return target
 }
 
 export function mirrorPoints(points, axis) {

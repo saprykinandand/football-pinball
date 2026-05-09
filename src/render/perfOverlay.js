@@ -46,6 +46,9 @@ export class PerfOverlay {
       `Delta ${Math.round(delta)}>${Math.round(visualDelta)}ms`,
       `Matter debug ${details.debugOn ? 'on' : 'off'}`,
       `Deferred ${details.deferredUpdates || 0}`,
+      `Static redraws ${details.staticRedraws || 0}`,
+      `Dynamic objects ${details.dynamicObjects || 0}`,
+      `Ball pts reused ${details.ballPointsReused || 0}`,
     ].join('\n'))
   }
 }
