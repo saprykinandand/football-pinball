@@ -90,6 +90,7 @@ export class PinballScene extends Phaser.Scene {
     this.ballVisualAngle = 0
     this.ballImpactSquash = 0
     this.ballImpactAngle = 0
+    this.ballTrailImage = null
     this.lastImpactShakeAt = -Infinity
     this.lastGoalShakeAt = -Infinity
     this.launchArrow = null
@@ -110,6 +111,9 @@ export class PinballScene extends Phaser.Scene {
     this.staticGraphics = this.add.graphics()
     this.layoutGraphics = this.add.graphics()
     this.editGraphics = this.add.graphics()
+    this.staticGraphics.setDepth(0)
+    this.layoutGraphics.setDepth(2)
+    this.editGraphics.setDepth(3)
     this.perfOverlay = new PerfOverlay(this)
     this.indexLevelObjects()
     this.bindControls()

@@ -3,6 +3,10 @@ import { params } from '../config/runtimeParams.js'
 import { cleanPoints, polygonCenter } from '../level/geometry.js'
 import { DRAW_ORDER, PLAY_DYNAMIC_DRAW_ORDER, PLAY_STATIC_DRAW_ORDER, colorToNumber } from './renderUtils.js'
 
+const BALL_TRAIL_TEXTURE_KEY = 'ball-speed-trail-gradient'
+const BALL_TRAIL_TEXTURE_WIDTH = 128
+const BALL_TRAIL_TEXTURE_HEIGHT = 16
+
 export function drawLevel(scene) {
   refreshStaticRender(scene)
   scene.layoutGraphics.clear()
@@ -21,7 +25,10 @@ export function drawLevel(scene) {
   }
 
   if (scene.ballBody) {
+    drawBallTrail(scene)
     drawBall(scene)
+  } else {
+    hideBallTrail(scene)
   }
 
   drawLaunchArrow(scene)
@@ -69,6 +76,62 @@ function staticDrawOrder(scene) {
 
 function dynamicDrawOrder(scene) {
   return scene.mode === 'play' ? PLAY_DYNAMIC_DRAW_ORDER : []
+}
+
+function drawBallTrail(scene) {
+  const velocity = scene.ballBody.velocity
+  const speed = Math.hypot(velocity.x, velocity.y)
+  const maxSpeed = Math.max(params.maxBallSpeed, 1)
+  const threshold = Phaser.Math.Clamp(params.ballTrailSpeedThreshold ?? maxSpeed * 0.55, 0, maxSpeed)
+  if (speed <= threshold) {
+    hideBallTrail(scene)
+    return
+  }
+
+  const fadeAmount = Phaser.Math.Clamp((speed - threshold) / Math.max(threshold * 0.5, 1), 0, 1)
+  const ballRadius = scene.getBallRadius()
+  const angle = ballSquashAngle(scene)
+  const dirX = Math.cos(angle)
+  const dirY = Math.sin(angle)
+  const squash = ballSquashAmount(scene)
+  const squeeze = Math.max(0.55, 1 - squash * 0.65)
+  const trailLength = Math.max(0, params.ballTrailMaxLength) * (0.82 + fadeAmount * 0.18)
+  const maxWidth = ballRadius * 2 * squeeze * Math.max(0, params.ballTrailWidthScale)
+  const maxAlpha = Phaser.Math.Clamp(params.ballTrailAlpha, 0, 1) * fadeAmount
+  const trail = ensureBallTrailImage(scene)
+
+  trail
+    .setPosition(scene.ballBody.position.x, scene.ballBody.position.y)
+    .setRotation(angle)
+    .setAlpha(maxAlpha)
+    .setDisplaySize(Math.max(1, trailLength), Math.max(1, maxWidth))
+    .setVisible(true)
+}
+
+function ensureBallTrailImage(scene) {
+  if (!scene.textures.exists(BALL_TRAIL_TEXTURE_KEY)) {
+    const texture = scene.textures.createCanvas(BALL_TRAIL_TEXTURE_KEY, BALL_TRAIL_TEXTURE_WIDTH, BALL_TRAIL_TEXTURE_HEIGHT)
+    const context = texture.context
+    const gradient = context.createLinearGradient(0, 0, BALL_TRAIL_TEXTURE_WIDTH, 0)
+    gradient.addColorStop(0, 'rgba(115, 115, 115, 0)')
+    gradient.addColorStop(1, 'rgba(84, 248, 149, 1)')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, BALL_TRAIL_TEXTURE_WIDTH, BALL_TRAIL_TEXTURE_HEIGHT)
+    texture.refresh()
+  }
+
+  if (!scene.ballTrailImage) {
+    scene.ballTrailImage = scene.add.image(0, 0, BALL_TRAIL_TEXTURE_KEY)
+      .setOrigin(1, 0.5)
+      .setDepth(1)
+      .setVisible(false)
+  }
+
+  return scene.ballTrailImage
+}
+
+function hideBallTrail(scene) {
+  scene.ballTrailImage?.setVisible(false)
 }
 
 function drawBall(scene) {

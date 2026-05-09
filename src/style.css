@@ -186,6 +186,56 @@ body,
   display: none;
 }
 
+.debug-pane .tp-lblv_l {
+  align-items: center;
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tuning-help-button {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(176, 181, 188, 0.55);
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(176, 181, 188, 0.08);
+  color: rgba(214, 218, 224, 0.78);
+  font: 700 9px/1 Arial, sans-serif;
+  cursor: help;
+}
+
+.tuning-help-button:hover,
+.tuning-help-button:focus,
+.tuning-help-button.is-active {
+  border-color: #d3d7dd;
+  background: rgba(211, 215, 221, 0.16);
+  color: #f4f6f8;
+  outline: none;
+}
+
+.tuning-help-tooltip {
+  position: fixed;
+  z-index: 20;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid rgba(176, 181, 188, 0.36);
+  border-radius: 8px;
+  background: #101418;
+  color: #e1e5eb;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+  font: 0.76rem/1.35 Arial, sans-serif;
+  pointer-events: auto;
+}
+
+.tuning-help-tooltip[hidden] {
+  display: none;
+}
+
 #app:not(.tuning-open) .toolbar,
 #app:not(.tuning-open) .editor-column,
 #app:not(.tuning-open) .touch-controls {
